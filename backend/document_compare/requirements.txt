@@ -1,0 +1,19 @@
+# document_compare 服务依赖（conda 环境：agent，与 document_extract 共用）
+# Python 3.10+，CUDA 12.6
+#
+# paddlepaddle-gpu 需通过专用索引安装，例如：
+#   pip install paddlepaddle-gpu==3.0.0 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
+
+fastapi==0.140.7
+uvicorn==0.51.0
+paddlepaddle-gpu==3.0.0
+paddleocr==3.0.3
+paddlex==3.0.3
+rapidocr==3.3.1
+Levenshtein==0.27.3
+pymupdf==1.28.0
+numpy==2.3.5
+opencv-python==5.0.0.93
+pillow==12.1.0
+pydantic==2.13.4
+python-multipart==0.0.32

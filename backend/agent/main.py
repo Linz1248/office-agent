@@ -1,0 +1,835 @@
+"""AI 办公搭子 Agent Service。
+
+基于 AgentScope 2.0 框架，通过 Agent + MCP 工具实现智能办公助手。
+对外暴露:
+  - POST /chat                 : 与 Agent 对话（SSE 流式响应，含思维链）
+  - POST /chat/stop            : 停止当前会话的 Agent 输出
+  - POST /upload               : 上传 PDF 文件到文档抽取与比对服务
+  - DELETE /sessions/{sid}     : 删除指定会话的持久化上下文
+  - GET  /health               : 健康检查
+
+上下文管理:
+  - 每个会话拥有独立的 AgentState（工作记忆），包含对话上下文与压缩摘要。
+  - AgentState 序列化为 JSON 存入 SQLite 数据库，重新打开历史会话时自动恢复。
+  - 感知环境：通过 InjectionConfig 在每次推理前注入运行时状态（时间、任务、上下文用量），
+    让智能体持续感知环境变化。
+  - 上下文压缩：通过 ContextConfig 配置，长对话自动摘要以保持在模型窗口内。
+  - 上下文卸载：通过 LocalWorkspace 作为 offloader，被压缩的消息与截断的工具结果
+    持久化到磁盘，智能体可按需回查。
+  - 会话以 (user_id, session_id) 复合主键隔离，用户间互不可见。
+
+长期记忆:
+  - 通过 AgenticMemoryMiddleware 实现：智能体自主将用户偏好、历史决策与知识
+    沉淀为 Markdown 文件，跨会话复用。
+  - 每个用户拥有独立的记忆工作目录（MEMORY_DIR/<user_id>），用户间互不可见。
+  - 中间件将 MEMORY.md 索引注入系统提示，并在每次回复前异步检索相关记忆文件
+    以 HintBlock 形式插入上下文；检索使用独立的非流式/非思维链模型，避免与主
+    推理流式连接冲突。
+  - 智能体通过 Read/Write/Edit 工具自主创建、读取与修订记忆文件。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+import aiosqlite
+import httpx
+import jwt as pyjwt
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+import uvicorn
+
+from agentscope.agent import (
+    Agent,
+    ReActConfig,
+    ContextConfig,
+    InjectionConfig,
+)
+from agentscope.message import Msg, UserMsg
+from agentscope.mcp import MCPClient, HttpMCPConfig
+from agentscope.middleware import AgenticMemoryMiddleware
+from agentscope.state import AgentState
+from agentscope.permission import PermissionContext, PermissionMode
+from agentscope.tool import (
+    Toolkit,
+    TaskCreate,
+    TaskGet,
+    TaskList,
+    TaskUpdate,
+    Read,
+    Write,
+    Edit,
+)
+from agentscope.workspace import LocalWorkspace
+
+from config import (
+    AGENT_MAX_ITERS,
+    CONTEXT_RESERVE_RATIO,
+    CONTEXT_TRIGGER_RATIO,
+    DOC_COMPARE_URL,
+    DOC_EXTRACT_URL,
+    INJECTION_CONTEXT_BUFFER_RATIO,
+    INJECTION_TIME_INTERVAL,
+    INJECTION_TIMEZONE,
+    JWT_ALGORITHM,
+    JWT_SECRET_KEY,
+    LLM_PROVIDER,
+    LLM_THINKING_ENABLE,
+    MEMORY_DIR,
+    OFFICE_MCP_URL,
+    PORT,
+    SERVICE_ACCOUNT_PASSWORD,
+    SERVICE_ACCOUNT_USERNAME,
+    SESSION_DB_PATH,
+    TOOL_RESULT_LIMIT,
+    WORKSPACE_DIR,
+)
+from llm_config import get_model_and_formatter, get_memory_model
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    logger.addHandler(handler)
+logger.propagate = False
+
+SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。你可以帮助用户完成以下办公任务：
+
+1. **文档抽取**：从已上传的 PDF 文档中提取指定字段信息（如合同名称、签订日期、甲乙方等）。
+2. **文档比对**：比对两份 PDF 文档的文本和印章差异，输出相似度分数。
+3. **图像检索**：通过文字描述在图像库中搜索相似图片。
+4. **音频检索**：通过文字描述在音频库中搜索匹配的音频片段。
+
+文件上传：
+- 用户可以直接在对话框中上传 PDF 文件。上传成功后，消息中会附带文件信息，包含原始文件名、文档抽取文件名（extract_filename）和文档比对文件名（compare_filename）。
+- 调用 extract_document 工具时，使用 extract_filename 作为 filename 参数。
+- 调用 compare_documents 工具时，使用 compare_filename 作为 benchmark_file 或 compare_file 参数。
+- 如果用户消息中没有文件信息但请求涉及文档操作，提示用户先上传文件。
+
+工作原则：
+- 始终使用中文回复，保持简洁专业。
+- 当用户请求涉及上述功能时，主动调用相应工具完成任务。
+- 对于需要多个步骤的复杂任务，使用任务规划工具（TaskCreate、TaskUpdate）拆解步骤、跟踪进度，让用户了解执行计划。
+- 工具调用后，将结果以易读的格式呈现给用户，不要直接输出原始 JSON。
+- 如果信息不足（如缺少文件名），主动向用户询问。
+- 对于不确定的问题，如实告知用户，不要编造信息。
+"""
+
+
+# ── 鉴权 ──────────────────────────────────────────────────────
+_security = HTTPBearer()
+
+
+async def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+) -> str:
+    """验证 JWT token，返回用户名（作为 user_id）。"""
+    try:
+        payload = pyjwt.decode(
+            credentials.credentials,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+        )
+        username = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="无效的认证信息")
+        return username
+    except pyjwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="认证信息已失效")
+
+
+# 会话状态持久化
+class SessionStore:
+    """基于 SQLite 的会话状态存储（用户隔离）。
+
+    以 (user_id, session_id) 为复合主键，确保不同用户的会话互不可见。
+    state_json 列保存序列化后的 AgentState（对话上下文、压缩摘要等）。
+    """
+
+    def __init__(self, db_path):
+        self.db_path = str(db_path)
+        self._db: aiosqlite.Connection | None = None
+
+    async def init(self) -> None:
+        """打开数据库连接并建表。"""
+        self._db = await aiosqlite.connect(self.db_path)
+        # 若旧版表缺少 user_id 列，删除重建（旧数据无用户隔离，不可用）
+        cursor = await self._db.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        await cursor.close()
+        if columns and "user_id" not in columns:
+            await self._db.execute("DROP TABLE sessions")
+            logger.info("检测到旧版 sessions 表（无 user_id 列），已删除重建")
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                user_id     TEXT NOT NULL,
+                session_id  TEXT NOT NULL,
+                state_json  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                PRIMARY KEY (user_id, session_id)
+            )
+        """)
+        await self._db.commit()
+
+    async def close(self) -> None:
+        """关闭数据库连接。"""
+        if self._db:
+            await self._db.close()
+            self._db = None
+
+    async def load_state(self, user_id: str, session_id: str) -> AgentState | None:
+        """加载指定用户的会话状态，若不存在则返回 None。"""
+        if not self._db:
+            return None
+        try:
+            cursor = await self._db.execute(
+                "SELECT state_json FROM sessions WHERE user_id = ? AND session_id = ?",
+                (user_id, session_id),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None:
+                return None
+            return AgentState.model_validate_json(row[0])
+        except Exception as e:
+            logger.warning(f"加载会话状态失败 {user_id}/{session_id}: {e}")
+            return None
+
+    async def save_state(self, user_id: str, session_id: str, state: AgentState) -> None:
+        """持久化会话状态到 SQLite（不存在则插入，存在则更新）。"""
+        if not self._db:
+            return
+        try:
+            state_json = state.model_dump_json()
+            now = datetime.now(timezone.utc).isoformat()
+            await self._db.execute(
+                "INSERT INTO sessions (user_id, session_id, state_json, updated_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(user_id, session_id) DO UPDATE SET "
+                "state_json = excluded.state_json, updated_at = excluded.updated_at",
+                (user_id, session_id, state_json, now),
+            )
+            await self._db.commit()
+        except Exception as e:
+            logger.warning(f"保存会话状态失败 {user_id}/{session_id}: {e}")
+
+    async def delete_state(self, user_id: str, session_id: str) -> bool:
+        """删除指定用户的会话状态记录，返回是否删除成功。"""
+        if not self._db:
+            return False
+        cursor = await self._db.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
+        )
+        await self._db.commit()
+        deleted = cursor.rowcount > 0
+        await cursor.close()
+        return deleted
+
+
+# 全局共享资源（在 lifespan 中初始化）
+# 这些资源在所有会话间共享，Agent 实例按请求创建（携带各自的 state）
+_model = None
+_memory_model = None
+_toolkit: Toolkit | None = None
+_react_config: ReActConfig | None = None
+_context_config: ContextConfig | None = None
+_injection_config: InjectionConfig | None = None
+_workspace: LocalWorkspace | None = None
+_session_store: SessionStore | None = None
+
+# 活跃回复任务注册表：key = "user_id:session_id"，用于支持停止输出
+_active_reply_tasks: dict[str, asyncio.Task] = {}
+# 中断哨兵：放入队列表示用户已取消
+_CANCELLED = object()
+
+# 文档服务 HTTP 客户端（在 lifespan 中初始化）
+_http_client: httpx.AsyncClient | None = None
+
+# document_extract 服务 JWT token 缓存
+_extract_token: str | None = None
+_extract_token_expires: float = 0.0
+
+
+async def _get_extract_token() -> str:
+    """使用服务账号登录 document_extract 服务，获取 JWT token。"""
+    global _extract_token, _extract_token_expires
+    if _extract_token and time.time() < _extract_token_expires - 60:
+        return _extract_token
+
+    resp = await _http_client.post(
+        f"{DOC_EXTRACT_URL}/login",
+        json={
+            "username": SERVICE_ACCOUNT_USERNAME,
+            "password": SERVICE_ACCOUNT_PASSWORD,
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    _extract_token = data["access_token"]
+    _extract_token_expires = time.time() + data.get("expiresIn", 86400000) / 1000
+    return _extract_token
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时创建共享资源，关闭时清理。"""
+    global _model, _memory_model, _toolkit, _react_config, _context_config
+    global _injection_config, _workspace, _session_store, _http_client
+
+    logger.info("正在初始化 AI 办公搭子 Agent...")
+    logger.info(f"LLM 提供商: {LLM_PROVIDER}, thinking_enable: {LLM_THINKING_ENABLE}")
+    logger.info(f"MCP Server URL: {OFFICE_MCP_URL}")
+
+    # 1. 创建统一 LLM 模型（formatter 已在模型内部设置）
+    _model, _ = get_model_and_formatter()
+
+    # 2. 创建长期记忆检索模型（非流式、非思维链，供 AgenticMemoryMiddleware
+    #    异步选择相关记忆文件；与主推理模型分离以避免流式连接冲突）
+    _memory_model = get_memory_model()
+
+    # 3. 创建 MCP 客户端（无状态 HTTP，无需手动 connect/close）
+    mcp_client = MCPClient(
+        name="office_tools",
+        is_stateful=False,
+        mcp_config=HttpMCPConfig(
+            url=OFFICE_MCP_URL,
+            timeout=300.0,
+        ),
+    )
+
+    # 4. 创建 Toolkit（MCP 工具 + 计划工具 + 文件读写工具）
+    #    Read/Write/Edit 供智能体自主管理长期记忆 Markdown 文件
+    _toolkit = Toolkit(
+        tools=[
+            TaskCreate(),
+            TaskGet(),
+            TaskList(),
+            TaskUpdate(),
+            Read(),
+            Write(),
+            Edit(),
+        ],
+        mcps=[mcp_client],
+    )
+
+    # 5. 配置 ReAct 循环与上下文压缩
+    _react_config = ReActConfig(max_iters=AGENT_MAX_ITERS)
+    _context_config = ContextConfig(
+        trigger_ratio=CONTEXT_TRIGGER_RATIO,
+        reserve_ratio=CONTEXT_RESERVE_RATIO,
+        tool_result_limit=TOOL_RESULT_LIMIT,
+    )
+    logger.info(
+        f"上下文压缩: trigger_ratio={CONTEXT_TRIGGER_RATIO}, "
+        f"reserve_ratio={CONTEXT_RESERVE_RATIO}, "
+        f"tool_result_limit={TOOL_RESULT_LIMIT}"
+    )
+
+    # 6. 配置感知环境（运行时状态注入：时间、任务、上下文用量）
+    _injection_config = InjectionConfig(
+        timezone=INJECTION_TIMEZONE,
+        time_interval=INJECTION_TIME_INTERVAL,
+        context_buffer_ratio=INJECTION_CONTEXT_BUFFER_RATIO,
+    )
+    logger.info(
+        f"感知环境: timezone={INJECTION_TIMEZONE}, "
+        f"time_interval={INJECTION_TIME_INTERVAL}h, "
+        f"context_buffer_ratio={INJECTION_CONTEXT_BUFFER_RATIO}"
+    )
+
+    # 7. 初始化工作区（作为 offloader 持久化被压缩的消息与截断的工具结果）
+    _workspace = LocalWorkspace(workdir=str(WORKSPACE_DIR))
+    await _workspace.initialize()
+    logger.info(f"上下文卸载工作区: {WORKSPACE_DIR}")
+
+    # 8. 初始化长期记忆根目录（每用户子目录由中间件按需创建）
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info(f"长期记忆根目录: {MEMORY_DIR}")
+
+    # 9. 初始化会话状态存储（SQLite）
+    _session_store = SessionStore(SESSION_DB_PATH)
+    await _session_store.init()
+    logger.info(f"会话状态数据库: {SESSION_DB_PATH}")
+
+    # 10. 初始化文档服务 HTTP 客户端（用于文件上传转发）
+    global _http_client
+    _http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(300.0, connect=10.0),
+    )
+
+    logger.info("AI 办公搭子 Agent 初始化完成")
+
+    yield
+
+    # 关闭文档服务 HTTP 客户端
+    if _http_client:
+        await _http_client.aclose()
+
+    # 关闭工作区
+    if _workspace:
+        await _workspace.close()
+
+    # 关闭数据库连接
+    if _session_store:
+        await _session_store.close()
+
+    _model = None
+    _memory_model = None
+    _toolkit = None
+    _react_config = None
+    _context_config = None
+    _injection_config = None
+    _workspace = None
+    _session_store = None
+    _http_client = None
+    logger.info("Agent 已关闭")
+
+
+app = FastAPI(title="AI 办公搭子", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ChatAttachment(BaseModel):
+    """用户上传文件的元信息，用于告知 Agent 可用的文件名。"""
+    original_name: str
+    extract_filename: str
+    compare_filename: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str
+    attachments: list[ChatAttachment] | None = None
+
+
+class StopRequest(BaseModel):
+    session_id: str
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "agent_ready": (
+            _model is not None
+            and _memory_model is not None
+            and _workspace is not None
+            and _http_client is not None
+        ),
+    }
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
+    """删除指定会话的持久化上下文。"""
+    if _session_store is None:
+        return JSONResponse(
+            {"detail": "服务尚未初始化完成"}, status_code=503
+        )
+    deleted = await _session_store.delete_state(user_id, session_id)
+    return {"status": "ok", "deleted": deleted}
+
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    user_id: str = Depends(verify_token),
+):
+    """上传 PDF 文件，自动转发到文档抽取与文档比对服务。
+
+    文件会被同时上传到两个后端服务（各自生成独立的存储文件名），
+    前端在后续 /chat 请求中携带返回的文件名，Agent 即可调用
+    extract_document / compare_documents 工具处理该文件。
+
+    Returns:
+        dict: 包含 original_name、extract_filename、compare_filename
+    """
+    global _extract_token, _extract_token_expires
+
+    if _http_client is None:
+        return JSONResponse(
+            {"detail": "服务尚未初始化完成"}, status_code=503
+        )
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
+
+    content = await file.read()
+
+    # 上传到 document_extract 服务（需要 JWT 认证）
+    try:
+        token = await _get_extract_token()
+        extract_resp = await _http_client.post(
+            f"{DOC_EXTRACT_URL}/doc_upload",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": (file.filename, content, "application/pdf")},
+        )
+        if extract_resp.status_code == 401:
+            # token 过期，重置后重试
+            _extract_token = None
+            _extract_token_expires = 0.0
+            token = await _get_extract_token()
+            extract_resp = await _http_client.post(
+                f"{DOC_EXTRACT_URL}/doc_upload",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": (file.filename, content, "application/pdf")},
+            )
+        extract_resp.raise_for_status()
+        extract_filename = extract_resp.json()["saved_name"]
+    except httpx.ConnectError:
+        logger.exception("文档抽取服务连接失败")
+        raise HTTPException(
+            status_code=502,
+            detail="文档抽取服务不可达，请确认该服务已启动",
+        )
+    except httpx.TimeoutException:
+        logger.exception("文档抽取服务请求超时")
+        raise HTTPException(
+            status_code=504,
+            detail="文档抽取服务响应超时，请稍后重试",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "文档抽取服务返回错误: status=%s, body=%s",
+            e.response.status_code,
+            e.response.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"文档抽取服务返回错误 ({e.response.status_code})",
+        )
+    except Exception as e:
+        logger.exception("上传到文档抽取服务时发生意外错误")
+        raise HTTPException(
+            status_code=502,
+            detail=f"上传到文档抽取服务失败: {e}",
+        )
+
+    # 上传到 document_compare 服务（无需认证）
+    try:
+        compare_resp = await _http_client.post(
+            f"{DOC_COMPARE_URL}/upload",
+            files={"file": (file.filename, content, "application/pdf")},
+        )
+        compare_resp.raise_for_status()
+        compare_filename = compare_resp.json()["saved_name"]
+    except httpx.ConnectError:
+        logger.exception("文档比对服务连接失败")
+        raise HTTPException(
+            status_code=502,
+            detail="文档比对服务不可达，请确认该服务已启动",
+        )
+    except httpx.TimeoutException:
+        logger.exception("文档比对服务请求超时")
+        raise HTTPException(
+            status_code=504,
+            detail="文档比对服务响应超时，请稍后重试",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "文档比对服务返回错误: status=%s, body=%s",
+            e.response.status_code,
+            e.response.text[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"文档比对服务返回错误 ({e.response.status_code})",
+        )
+    except Exception as e:
+        logger.exception("上传到文档比对服务时发生意外错误")
+        raise HTTPException(
+            status_code=502,
+            detail=f"上传到文档比对服务失败: {e}",
+        )
+
+    logger.info(
+        f"文件上传成功: user={user_id}, original={file.filename}, "
+        f"extract={extract_filename}, compare={compare_filename}"
+    )
+
+    return {
+        "original_name": file.filename,
+        "extract_filename": extract_filename,
+        "compare_filename": compare_filename,
+    }
+
+
+def _user_memory_workdir(user_id: str) -> str:
+    """返回用户专属长期记忆工作目录的绝对路径。
+
+    对 user_id 做文件名安全化处理，防止路径穿越：仅保留字母、数字、
+    ``._-``，其余字符替换为下划线，并剥离首尾的 ``._-`` 以避免
+    ``..`` 等危险片段。
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", user_id).strip("._-")
+    return str(MEMORY_DIR / (safe or "default"))
+
+
+def _create_agent(state: AgentState, user_id: str) -> Agent:
+    """使用共享资源和给定状态创建 Agent 实例。
+
+    每次请求创建新的 Agent，通过传入恢复的 AgentState 实现
+    会话上下文的重新注入。模型、Toolkit 等重量级资源全局共享；
+    长期记忆中间件按用户隔离（每用户独立记忆目录，跨会话复用）。
+    """
+    memory_middleware = AgenticMemoryMiddleware(
+        workdir=_user_memory_workdir(user_id),
+        parameters=AgenticMemoryMiddleware.Parameters(
+            retrieval_model=_memory_model,
+        ),
+    )
+    return Agent(
+        name="office_assistant",
+        system_prompt=SYSTEM_PROMPT,
+        model=_model,
+        toolkit=_toolkit,
+        react_config=_react_config,
+        context_config=_context_config,
+        injection_config=_injection_config,
+        offloader=_workspace,
+        middlewares=[memory_middleware],
+        state=state,
+    )
+
+
+def _sse(data: dict) -> str:
+    """格式化 SSE 事件。"""
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.post("/chat/stop")
+async def stop_chat(req: StopRequest, user_id: str = Depends(verify_token)):
+    """停止指定会话的 Agent 输出。
+
+    通过 task.cancel() 触发 asyncio.CancelledError，
+    AgentScope 框架会干净地展开当前推理-行动步骤，上下文保持一致。
+    """
+    task_key = f"{user_id}:{req.session_id}"
+    task = _active_reply_tasks.get(task_key)
+    if task and not task.done():
+        task.cancel()
+        logger.info(f"停止 Agent 输出: user={user_id}, session={req.session_id}")
+        return {"status": "ok", "stopped": True}
+    return {"status": "ok", "stopped": False}
+
+
+@app.post("/chat")
+async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
+    """与 Agent 对话，返回 SSE 流式响应。
+
+    每次请求：
+    1. 加载该 session 的持久化 AgentState（若不存在则新建）
+    2. 用恢复的状态创建 Agent，实现上下文重新注入
+    3. 将 reply_stream 放入独立 Task，通过队列传递事件（支持外部取消）
+    4. 流式返回 Agent 回复
+    5. 回复结束后将更新后的 AgentState 持久化保存
+
+    事件类型:
+      - thinking:          思维链增量文本
+      - tool_call:         工具调用开始（含 id 和 name）
+      - tool_args:         工具调用参数增量
+      - tool_result_delta: 工具返回文本结果增量
+      - tool_result_data:  工具返回非文本数据（含 url 和 media_type）
+      - tool_result:       工具调用结束（含 id 和 state）
+      - hint:              运行时状态注入提示（感知环境）
+      - token:             最终回答增量文本
+      - done:              流正常结束
+      - stopped:           用户主动停止
+      - error:             出错（含超迭代上限）
+    """
+    if (
+        _model is None
+        or _memory_model is None
+        or _toolkit is None
+        or _session_store is None
+        or _workspace is None
+    ):
+        return JSONResponse(
+            {"detail": "Agent 尚未初始化完成"}, status_code=503
+        )
+
+    # 若该会话有正在运行的回复任务，先取消
+    task_key = f"{user_id}:{req.session_id}"
+    old_task = _active_reply_tasks.get(task_key)
+    if old_task and not old_task.done():
+        old_task.cancel()
+
+    # 加载或创建会话状态（工作记忆）
+    state = await _session_store.load_state(user_id, req.session_id)
+    if state is None:
+        state = AgentState(session_id=req.session_id)
+        logger.info(f"创建新会话: user={user_id}, session={req.session_id}")
+    else:
+        logger.info(f"恢复历史会话上下文: user={user_id}, session={req.session_id}")
+
+    # 设置 BYPASS 权限模式，允许 MCP 工具自动执行（无需用户确认）
+    state.permission_context = PermissionContext(mode=PermissionMode.BYPASS)
+
+    # 用恢复的状态创建 Agent，注入历史上下文
+    agent = _create_agent(state, user_id)
+
+    # 构建用户消息：如有附件，将文件信息追加到消息文本中
+    if req.attachments:
+        file_list = "\n".join(
+            f"  - {a.original_name}"
+            f"（extract_filename: {a.extract_filename}, "
+            f"compare_filename: {a.compare_filename}）"
+            for a in req.attachments
+        )
+        message_text = f"{req.message}\n\n[已上传文件]\n{file_list}"
+    else:
+        message_text = req.message
+    user_msg = UserMsg("user", message_text)
+
+    async def event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def run_reply():
+            """在独立 Task 中消费 reply_stream，将事件放入队列。"""
+            try:
+                async for event in agent.reply_stream(user_msg, yield_final_msg=True):
+                    await queue.put(event)
+            except asyncio.CancelledError:
+                queue.put_nowait(_CANCELLED)
+            except Exception as e:
+                queue.put_nowait(e)
+            finally:
+                queue.put_nowait(None)
+
+        task = asyncio.create_task(run_reply())
+        _active_reply_tasks[task_key] = task
+
+        try:
+            while True:
+                event = await queue.get()
+
+                # None = 流结束
+                if event is None:
+                    break
+
+                # 用户取消
+                if event is _CANCELLED:
+                    yield _sse({"type": "stopped", "content": ""})
+                    break
+
+                # 异常
+                if isinstance(event, Exception):
+                    logger.exception("Agent 处理出错", exc_info=event)
+                    yield _sse({"type": "error", "content": f"处理出错: {str(event)}"})
+                    break
+
+                event_type = type(event).__name__
+
+                # DEBUG: 记录所有事件类型
+                logger.info(f"EVENT: {event_type}")
+
+                if event_type == "ThinkingBlockDeltaEvent":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        logger.info(f"Thinking delta: {delta[:80]}")
+                        yield _sse({"type": "thinking", "content": delta})
+
+                elif event_type == "TextBlockDeltaEvent":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        yield _sse({"type": "token", "content": delta})
+
+                elif event_type == "ToolCallStartEvent":
+                    yield _sse({
+                        "type": "tool_call",
+                        "id": getattr(event, "tool_call_id", ""),
+                        "name": getattr(event, "tool_call_name", ""),
+                    })
+
+                elif event_type == "ToolCallDeltaEvent":
+                    yield _sse({
+                        "type": "tool_args",
+                        "id": getattr(event, "tool_call_id", ""),
+                        "content": getattr(event, "delta", ""),
+                    })
+
+                elif event_type == "ToolResultTextDeltaEvent":
+                    yield _sse({
+                        "type": "tool_result_delta",
+                        "id": getattr(event, "tool_call_id", ""),
+                        "content": getattr(event, "delta", ""),
+                    })
+
+                elif event_type == "ToolResultDataDeltaEvent":
+                    yield _sse({
+                        "type": "tool_result_data",
+                        "id": getattr(event, "tool_call_id", ""),
+                        "url": getattr(event, "url", ""),
+                        "media_type": getattr(event, "media_type", ""),
+                    })
+
+                elif event_type == "ToolResultEndEvent":
+                    yield _sse({
+                        "type": "tool_result",
+                        "id": getattr(event, "tool_call_id", ""),
+                        "state": str(getattr(event, "state", "")),
+                    })
+
+                elif event_type == "HintBlockEvent":
+                    hint = getattr(event, "hint", "")
+                    if isinstance(hint, list):
+                        hint = "".join(
+                            getattr(block, "text", "") for block in hint
+                        )
+                    if hint:
+                        yield _sse({"type": "hint", "content": hint})
+
+                elif event_type == "ExceedMaxItersEvent":
+                    yield _sse({"type": "error", "content": "已达最大推理轮数，请尝试简化问题或提供更多信息。"})
+
+                elif event_type == "ReplyEndEvent":
+                    finished_reason = getattr(event, "finished_reason", "")
+                    error = getattr(event, "error", None)
+                    if error:
+                        yield _sse({"type": "error", "content": str(error)})
+                    else:
+                        yield _sse({"type": "done", "content": ""})
+
+        finally:
+            _active_reply_tasks.pop(task_key, None)
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            # 持久化更新后的会话状态（含本轮对话上下文）
+            await _session_store.save_state(user_id, req.session_id, agent.state)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, log_level="info")

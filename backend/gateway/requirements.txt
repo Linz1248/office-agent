@@ -1,0 +1,4 @@
+# API 网关依赖（可使用 retrieve 或 agent 环境运行，二者均已具备）
+fastapi>=0.140
+uvicorn>=0.51
+httpx>=0.27
