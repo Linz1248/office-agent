@@ -247,6 +247,10 @@ class DocEtractRequest(BaseModel):
     fields_template: dict
 
 
+class DocTextRequest(BaseModel):
+    filename: str
+
+
 class PasswordChange(BaseModel):
     username: str
     old_password: str
@@ -592,20 +596,26 @@ def _merge_text(first: str, second: str) -> str:
     return "\n\n".join(merged)
 
 
-def extract_concepts(file_path: str, fields: list, enhance: bool,
-                     fields_enhance: list, fields_template: dict,
-                     file_hash: str = None) -> tuple:
+def extract_pdf_text(file_path: str, file_hash: str | None = None) -> tuple:
     """
-    提取文档字段，支持 OCR 层缓存。
-    file_hash: 由调用方预先计算并传入，避免重复计算。
-    返回: (result_dict, timing_info)
-    """
+    OCR 提取 PDF 全文，复用 file_hash 缓存。
 
-    # ---------------- OCR 层缓存查询 ----------------
+    与 extract_concepts 共享同一份 OCR 管线与缓存键，避免重复 OCR。
+    供 /doc_text 接口与 extract_concepts 复用。
+
+    Args:
+        file_path: PDF 绝对路径。
+        file_hash: 由调用方预先计算并传入，用于命中 OCR 缓存。
+
+    Returns:
+        tuple: (pdf_text, timing_info)
+            timing_info 键: ocr_cache_hit / ocr_time / ocr_cache_query_time
+    """
     pdf_text = None
     ocr_cache_hit = False
     ocr_time = 0.0
     ocr_query_time = 0.0
+
     if file_hash:
         t0 = time.perf_counter()
         cached_text = get_ocr_cache(file_hash)
@@ -638,6 +648,26 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
         if file_hash:
             set_ocr_cache(file_hash, pdf_text)
             print(f"[OCR 缓存写入] file_hash={file_hash[:12]}... (OCR 耗时: {ocr_time:.4f}s)")
+
+    timing_info = {
+        "ocr_cache_hit": ocr_cache_hit,
+        "ocr_time": round(ocr_time, 4),
+        "ocr_cache_query_time": round(ocr_query_time * 1000, 2),
+    }
+    return pdf_text, timing_info
+
+
+def extract_concepts(file_path: str, fields: list, enhance: bool,
+                     fields_enhance: list, fields_template: dict,
+                     file_hash: str = None) -> tuple:
+    """
+    提取文档字段，支持 OCR 层缓存。
+    file_hash: 由调用方预先计算并传入，避免重复计算。
+    返回: (result_dict, timing_info)
+    """
+
+    # ---------------- OCR 提取全文（复用缓存） ----------------
+    pdf_text, ocr_timing = extract_pdf_text(file_path, file_hash)
 
     # 处理后的pdf内容
     with open(DATA_DIR / "temp.md", "w", encoding="UTF-8") as f:
@@ -724,12 +754,8 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
     print("===============================")
     print(res)
 
-    timing_info = {
-        "ocr_cache_hit": ocr_cache_hit,
-        "ocr_time": round(ocr_time, 4),
-        "ocr_cache_query_time": round(ocr_query_time * 1000, 2),
-    }
-    return res, timing_info
+    # OCR 计时由 extract_pdf_text 统一返回
+    return res, ocr_timing
 
 
 # ------------------------------------------------------------------
@@ -798,6 +824,37 @@ def do_extract(request: DocEtractRequest, upload_dir: Path) -> dict:
             "ocr_time_ms": round(extract_timing["ocr_time"] * 1000, 2),
             "ocr_cache_query_ms": extract_timing["ocr_cache_query_time"],
         },
+    }
+
+
+@app.post("/doc_text", summary="获取上传文档的全文文本（OCR 结果）")
+async def doc_text(request: DocTextRequest,
+                   current_user: str = Depends(verify_token)) -> Dict[str, Any]:
+    """返回已上传 PDF 的 OCR 全文，供 agent 做问答/摘要/解读等通用处理。
+
+    复用 extract_pdf_text 与 OCR 缓存（与 /doc_extract 共享缓存键），
+    已抽取过的文件读文本可秒回。
+    """
+    if not request.filename.strip():
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    file_path = UPLOAD_DIR / request.filename
+    if not file_path.exists():
+        raise HTTPException(status_code=400, detail="文件不存在")
+
+    try:
+        file_hash = compute_file_hash(str(file_path))
+        text, timing = extract_pdf_text(str(file_path), file_hash)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"读取文档文本失败：{e}")
+
+    return {
+        "message": "读取成功",
+        "filename": request.filename,
+        "text": text,
+        "chars": len(text),
+        "cache_hit": timing["ocr_cache_hit"],
     }
 
 

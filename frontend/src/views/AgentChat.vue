@@ -182,7 +182,7 @@
           <input
             ref="fileInput"
             type="file"
-            accept=".pdf"
+            accept=".pdf,.jpg,.jpeg,.png,.bmp,.webp"
             style="display: none"
             @change="handleFileSelect"
           />
@@ -221,7 +221,7 @@
             </svg>
           </button>
         </div>
-        <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击回形针上传 PDF</p>
+        <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击回形针上传 PDF 或图片</p>
       </footer>
     </div>
   </div>
@@ -247,8 +247,7 @@ const userInitial = computed(() => {
   return name.charAt(0).toUpperCase()
 })
 
-// ── 会话管理（localStorage 持久化） ──
-const STORAGE_KEY = 'agent-chat-sessions'
+// ── 会话管理（后端为唯一真源） ──
 const sessions = ref([])
 const currentSessionId = ref(null)
 const messages = ref([])
@@ -264,72 +263,58 @@ const suggestions = [
   '搜索包含"诗歌朗诵"的音频',
 ]
 
+// 本地消息 id 计数器：仅用于在内存数组中唯一标识消息，不参与持久化
 let msgId = 0
+const genId = () => ++msgId
 
-const loadSessions = () => {
+const authHeaders = () => ({ 'Authorization': store.getBearerToken })
+
+const loadSessions = async () => {
   try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    sessions.value = data ? JSON.parse(data) : []
-  } catch {
+    const resp = await fetch(`${config.agent}/sessions`, { headers: authHeaders() })
+    if (!resp.ok) throw new Error(`加载会话列表失败 (${resp.status})`)
+    const data = await resp.json()
+    sessions.value = data.sessions || []
+  } catch (e) {
+    console.warn('加载会话列表失败:', e)
     sessions.value = []
   }
 }
 
-const saveSessions = () => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
-}
-
-const saveCurrentSession = () => {
-  if (!currentSessionId.value || messages.value.length === 0) return
-  const session = sessions.value.find(s => s.id === currentSessionId.value)
-  if (session) {
-    session.messages = JSON.parse(JSON.stringify(messages.value))
-    session.updatedAt = Date.now()
-    saveSessions()
-  }
-}
-
 const startNewChat = () => {
-  saveCurrentSession()
   currentSessionId.value = null
   messages.value = []
 }
 
-const createSession = (firstMessage) => {
-  const id = String(Date.now())
-  sessions.value.unshift({
-    id,
-    title: firstMessage.slice(0, 30),
-    messages: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  })
-  currentSessionId.value = id
-  saveSessions()
-}
-
-const loadSession = (id) => {
-  saveCurrentSession()
-  const session = sessions.value.find(s => s.id === id)
-  if (session) {
+const loadSession = async (id) => {
+  try {
+    const resp = await fetch(`${config.agent}/sessions/${id}/messages`, { headers: authHeaders() })
+    if (!resp.ok) throw new Error(`加载会话失败 (${resp.status})`)
+    const data = await resp.json()
     currentSessionId.value = id
-    messages.value = JSON.parse(JSON.stringify(session.messages))
+    messages.value = (data.messages || []).map(m => ({
+      ...m,
+      loading: false,
+      thinkingExpanded: false,
+    }))
+    // 同步本地计数器，避免新消息 id 与历史消息冲突
+    msgId = Math.max(0, ...messages.value.map(m => Number(m.id) || 0))
     scrollToBottom()
+  } catch (e) {
+    console.warn('加载会话失败:', e)
   }
 }
 
 const deleteSession = async (id) => {
-  // 清理后端持久化的会话上下文
   try {
     await fetch(`${config.agent}/sessions/${id}`, {
       method: 'DELETE',
-      headers: { 'Authorization': store.getBearerToken },
+      headers: authHeaders(),
     })
   } catch (e) {
     console.warn('清理后端会话状态失败:', e)
   }
   sessions.value = sessions.value.filter(s => s.id !== id)
-  saveSessions()
   if (currentSessionId.value === id) {
     currentSessionId.value = null
     messages.value = []
@@ -337,15 +322,16 @@ const deleteSession = async (id) => {
 }
 
 const formatTime = (timestamp) => {
-  const diff = Date.now() - timestamp
+  const ts = Number(timestamp) || 0
+  const diff = Date.now() - ts
   const minutes = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
+  const days = Math.floor(diff / 8640000)
   if (minutes < 1) return '刚刚'
   if (minutes < 60) return `${minutes}分钟前`
   if (hours < 24) return `${hours}小时前`
   if (days < 7) return `${days}天前`
-  return new Date(timestamp).toLocaleDateString()
+  return new Date(ts).toLocaleDateString()
 }
 
 onMounted(() => {
@@ -374,13 +360,18 @@ const handleFileSelect = async (event) => {
   const files = event.target.files
   if (!files || !files.length) return
 
+  const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp']
+
   for (const file of files) {
-    if (!file.name.toLowerCase().endsWith('.pdf')) continue
+    const ext = '.' + file.name.toLowerCase().split('.').pop()
+    if (!allowedExts.includes(ext)) continue
 
     const att = reactive({
       original_name: file.name,
+      file_type: '',
       extract_filename: '',
       compare_filename: '',
+      file_path: '',
       uploading: true,
       error: '',
     })
@@ -399,8 +390,13 @@ const handleFileSelect = async (event) => {
         throw new Error(errData.detail || `上传失败 (${resp.status})`)
       }
       const data = await resp.json()
-      att.extract_filename = data.extract_filename
-      att.compare_filename = data.compare_filename
+      att.file_type = data.file_type
+      if (data.file_type === 'image') {
+        att.file_path = data.file_path
+      } else {
+        att.extract_filename = data.extract_filename
+        att.compare_filename = data.compare_filename
+      }
       att.uploading = false
     } catch (err) {
       att.uploading = false
@@ -437,14 +433,19 @@ const sendMessage = async () => {
   const readyAttachments = attachedFiles.value.filter(f => !f.uploading && !f.error)
   if ((!text && !readyAttachments.length) || isWaiting.value) return
 
-  // 首条消息时创建新会话
+  // 首条消息时创建新会话（本地占位，后端在 /chat 落盘）
   if (!currentSessionId.value) {
-    createSession(text || `上传了 ${readyAttachments.length} 个文件`)
+    currentSessionId.value = String(Date.now())
+    sessions.value.unshift({
+      id: currentSessionId.value,
+      title: (text || `上传了 ${readyAttachments.length} 个文件`).slice(0, 30),
+      updatedAt: Date.now(),
+    })
   }
 
   // 添加用户消息
   messages.value.push({
-    id: ++msgId,
+    id: genId(),
     role: 'user',
     content: text,
     attachments: readyAttachments.map(f => ({ original_name: f.original_name })),
@@ -455,7 +456,7 @@ const sendMessage = async () => {
 
   // 添加助手消息（等待响应）
   isWaiting.value = true
-  const loadingId = ++msgId
+  const loadingId = genId()
   messages.value.push({
     id: loadingId,
     role: 'assistant',
@@ -482,8 +483,10 @@ const sendMessage = async () => {
         attachments: readyAttachments.length
           ? readyAttachments.map(f => ({
               original_name: f.original_name,
-              extract_filename: f.extract_filename,
-              compare_filename: f.compare_filename,
+              file_type: f.file_type,
+              extract_filename: f.extract_filename || undefined,
+              compare_filename: f.compare_filename || undefined,
+              file_path: f.file_path || undefined,
             }))
           : undefined,
       }),
@@ -574,7 +577,9 @@ const sendMessage = async () => {
   } finally {
     isWaiting.value = false
     scrollToBottom()
-    saveCurrentSession()
+    // 同步本地会话列表的时间戳（消息与标题已由后端持久化）
+    const session = sessions.value.find(s => s.id === currentSessionId.value)
+    if (session) session.updatedAt = Date.now()
   }
 }
 </script>
@@ -747,7 +752,13 @@ const sendMessage = async () => {
   padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 28px;
+}
+
+/* AI 回复紧接用户输入时，额外加大两者的间隔 */
+.message-row.user + .message-row.assistant,
+.message-row.assistant + .message-row.user {
+  margin-top: 10px;
 }
 
 /* 欢迎屏 */

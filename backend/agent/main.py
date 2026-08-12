@@ -34,6 +34,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -55,7 +56,7 @@ from agentscope.agent import (
 )
 from agentscope.message import Msg, UserMsg
 from agentscope.mcp import MCPClient, HttpMCPConfig
-from agentscope.middleware import AgenticMemoryMiddleware
+from agentscope.middleware import AgenticMemoryMiddleware, MiddlewareBase
 from agentscope.state import AgentState
 from agentscope.permission import PermissionContext, PermissionMode
 from agentscope.tool import (
@@ -90,6 +91,7 @@ from config import (
     SERVICE_ACCOUNT_USERNAME,
     SESSION_DB_PATH,
     TOOL_RESULT_LIMIT,
+    UPLOAD_DIR,
     WORKSPACE_DIR,
 )
 from llm_config import get_model_and_formatter, get_memory_model
@@ -104,26 +106,46 @@ if not logger.handlers:
     logger.addHandler(handler)
 logger.propagate = False
 
-SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。你可以帮助用户完成以下办公任务：
+SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。你可以与用户进行日常对话，也可以调用工具完成具体的办公任务。
 
-1. **文档抽取**：从已上传的 PDF 文档中提取指定字段信息（如合同名称、签订日期、甲乙方等）。
-2. **文档比对**：比对两份 PDF 文档的文本和印章差异，输出相似度分数。
-3. **图像检索**：通过文字描述在图像库中搜索相似图片。
-4. **音频检索**：通过文字描述在音频库中搜索匹配的音频片段。
+你拥有以下工具能力：
+
+文档处理：
+- read_document：读取已上传 PDF 文档的全文文本（OCR 结果，Markdown 格式）。适用于用户对上传文档的一般性请求：解释、总结、问答、翻译、提取要点等。调用后由你基于全文直接作答。
+- extract_document：从已上传的 PDF 文档中抽取指定字段信息（如合同名称、签订日期、甲乙方等）
+- compare_documents：比对两份 PDF 文档的文本和印章差异，输出相似度分数
+
+多媒体检索：
+- search_images_by_text：通过文字描述在图像库中搜索相似图片
+- search_images_by_image：通过上传的图片搜索相似图片（以图搜图）
+- search_audios_by_text：通过文字描述在音频库中搜索匹配的音频片段
+- list_image_libraries / list_audio_libraries：查看可用的图像/音频库索引
+
+任务管理与文件操作：
+- TaskCreate / TaskUpdate / TaskList / TaskGet：创建和跟踪任务计划，适合复杂多步任务
+- Read / Write / Edit：读写文件，可用于记录笔记和管理长期记忆
 
 文件上传：
-- 用户可以直接在对话框中上传 PDF 文件。上传成功后，消息中会附带文件信息，包含原始文件名、文档抽取文件名（extract_filename）和文档比对文件名（compare_filename）。
-- 调用 extract_document 工具时，使用 extract_filename 作为 filename 参数。
-- 调用 compare_documents 工具时，使用 compare_filename 作为 benchmark_file 或 compare_file 参数。
-- 如果用户消息中没有文件信息但请求涉及文档操作，提示用户先上传文件。
+用户可以在对话框中上传 PDF 文件或图片。上传成功后，消息会附带文件信息：
+- PDF 文件：包含 extract_filename（用于 extract_document）和 compare_filename（用于 compare_documents）
+- 图片文件：包含 file_path（用于 search_images_by_image 的 file_path 参数）
+如果用户需要文档操作或图搜图但未上传文件，提示用户先上传。
+
+工具调用原则（重要）：
+- 只在用户明确请求需要工具支持的具体操作时才调用工具。例如用户说"提取合同日期"才调用 extract_document，用户说"比对这两份文件"才调用 compare_documents。
+- 用户上传 PDF 后，根据其意图选择处理方式，不要一刀切：
+  · 一般性请求（解释一下、总结、问答、翻译、提取要点、看看这个文件讲什么等）→ 调用 read_document 获取全文，由你直接作答；
+  · 明确要抽取特定字段（如"合同名称/签订日期/甲方"）→ 调用 extract_document，调用前需确认用户要提取哪些字段；
+  · 明确要比对两份文档 → 调用 compare_documents。
+- 不要为了使用工具而使用工具。很多问题（如闲聊、知识问答、建议）可以直接回答，无需调用任何工具。
+- 不要编造工具参数。如果工具需要特定参数（如 extract_document 需要 fields 列表），但用户没有提供，先询问用户要提取哪些字段。
+- 工具调用失败时，向用户说明失败原因，不要盲目重试。
 
 工作原则：
 - 始终使用中文回复，保持简洁专业。
-- 当用户请求涉及上述功能时，主动调用相应工具完成任务。
-- 对于需要多个步骤的复杂任务，使用任务规划工具（TaskCreate、TaskUpdate）拆解步骤、跟踪进度，让用户了解执行计划。
-- 工具调用后，将结果以易读的格式呈现给用户，不要直接输出原始 JSON。
-- 如果信息不足（如缺少文件名），主动向用户询问。
-- 对于不确定的问题，如实告知用户，不要编造信息。
+- 遇到复杂多步任务时，先用 TaskCreate 拆解步骤，再逐步执行。
+- 工具调用后，将结果整理为易读的格式呈现给用户，不要直接输出原始 JSON。
+- 信息不足时主动询问，不确定时如实告知，不编造信息。
 """
 
 
@@ -149,12 +171,29 @@ async def verify_token(
         raise HTTPException(status_code=401, detail="认证信息已失效")
 
 
+def _ms(ts: str | None) -> int:
+    """把存储的时间戳解析为数值毫秒，兼容旧的 ISO 字符串。"""
+    if not ts:
+        return 0
+    try:
+        return int(ts)
+    except (TypeError, ValueError):
+        try:
+            return int(datetime.fromisoformat(ts).timestamp() * 1000)
+        except Exception:
+            return 0
+
+
 # 会话状态持久化
 class SessionStore:
-    """基于 SQLite 的会话状态存储（用户隔离）。
+    """基于 SQLite 的会话存储（用户隔离）。
 
     以 (user_id, session_id) 为复合主键，确保不同用户的会话互不可见。
-    state_json 列保存序列化后的 AgentState（对话上下文、压缩摘要等）。
+    每行同时保存：
+      - state_json:    序列化后的 AgentState（LLM 工作记忆/压缩摘要）
+      - title:         会话标题（取自首条用户消息）
+      - messages_json: 用户可见的消息列表（用户消息与助手回复，含思维链/工具调用）
+    后端为会话历史的唯一真源，前端仅作缓存展示。
     """
 
     def __init__(self, db_path):
@@ -162,21 +201,34 @@ class SessionStore:
         self._db: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
-        """打开数据库连接并建表。"""
+        """打开数据库连接并建表/迁移。"""
         self._db = await aiosqlite.connect(self.db_path)
-        # 若旧版表缺少 user_id 列，删除重建（旧数据无用户隔离，不可用）
+
         cursor = await self._db.execute("PRAGMA table_info(sessions)")
         columns = {row[1] for row in await cursor.fetchall()}
         await cursor.close()
+
+        # 旧版表无 user_id 列：无用户隔离，不可用，删除重建
         if columns and "user_id" not in columns:
             await self._db.execute("DROP TABLE sessions")
             logger.info("检测到旧版 sessions 表（无 user_id 列），已删除重建")
+            columns = set()
+
+        # 增量迁移：为旧表补充新列（ALTER TABLE ADD COLUMN，数据保留）
+        for col in ("title", "messages_json", "created_at"):
+            if columns and col not in columns:
+                await self._db.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT")
+                logger.info(f"已为 sessions 表补充列: {col}")
+
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                user_id     TEXT NOT NULL,
-                session_id  TEXT NOT NULL,
-                state_json  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL,
+                user_id        TEXT NOT NULL,
+                session_id     TEXT NOT NULL,
+                title          TEXT,
+                messages_json  TEXT,
+                state_json     TEXT NOT NULL,
+                created_at     TEXT,
+                updated_at     TEXT NOT NULL,
                 PRIMARY KEY (user_id, session_id)
             )
         """)
@@ -189,7 +241,7 @@ class SessionStore:
             self._db = None
 
     async def load_state(self, user_id: str, session_id: str) -> AgentState | None:
-        """加载指定用户的会话状态，若不存在则返回 None。"""
+        """加载指定会话的 AgentState，若不存在则返回 None。"""
         if not self._db:
             return None
         try:
@@ -207,25 +259,93 @@ class SessionStore:
             return None
 
     async def save_state(self, user_id: str, session_id: str, state: AgentState) -> None:
-        """持久化会话状态到 SQLite（不存在则插入，存在则更新）。"""
+        """持久化 AgentState（upsert，不影响 title/messages_json）。"""
         if not self._db:
             return
         try:
             state_json = state.model_dump_json()
-            now = datetime.now(timezone.utc).isoformat()
+            now = str(int(time.time() * 1000))
             await self._db.execute(
-                "INSERT INTO sessions (user_id, session_id, state_json, updated_at) "
-                "VALUES (?, ?, ?, ?) "
+                "INSERT INTO sessions (user_id, session_id, state_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(user_id, session_id) DO UPDATE SET "
                 "state_json = excluded.state_json, updated_at = excluded.updated_at",
-                (user_id, session_id, state_json, now),
+                (user_id, session_id, state_json, now, now),
             )
             await self._db.commit()
         except Exception as e:
             logger.warning(f"保存会话状态失败 {user_id}/{session_id}: {e}")
 
+    async def load_session(
+        self, user_id: str, session_id: str
+    ) -> dict | None:
+        """加载会话元数据与消息列表，不存在则返回 None。"""
+        if not self._db:
+            return None
+        try:
+            cursor = await self._db.execute(
+                "SELECT title, messages_json FROM sessions "
+                "WHERE user_id = ? AND session_id = ?",
+                (user_id, session_id),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None:
+                return None
+            title, messages_json = row
+            messages = json.loads(messages_json) if messages_json else []
+            return {"title": title, "messages": messages}
+        except Exception as e:
+            logger.warning(f"加载会话消息失败 {user_id}/{session_id}: {e}")
+            return None
+
+    async def save_messages(
+        self, user_id: str, session_id: str, title: str | None, messages: list
+    ) -> None:
+        """持久化消息列表与标题（upsert，不影响 state_json）。
+
+        新建行时 state_json 用占位空对象，随后由 save_state 写入真实状态。
+        """
+        if not self._db:
+            return
+        try:
+            messages_json = json.dumps(messages, ensure_ascii=False)
+            now = str(int(time.time() * 1000))
+            await self._db.execute(
+                "INSERT INTO sessions "
+                "(user_id, session_id, title, messages_json, state_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, '{}', ?, ?) "
+                "ON CONFLICT(user_id, session_id) DO UPDATE SET "
+                "title = excluded.title, messages_json = excluded.messages_json, "
+                "updated_at = excluded.updated_at",
+                (user_id, session_id, title, messages_json, now, now),
+            )
+            await self._db.commit()
+        except Exception as e:
+            logger.warning(f"保存会话消息失败 {user_id}/{session_id}: {e}")
+
+    async def list_sessions(self, user_id: str) -> list[dict]:
+        """列出用户的所有会话（按 updated_at 倒序）。"""
+        if not self._db:
+            return []
+        try:
+            cursor = await self._db.execute(
+                "SELECT session_id, title, updated_at FROM sessions "
+                "WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            return [
+                {"id": sid, "title": title or "新会话", "updatedAt": _ms(updated_at)}
+                for sid, title, updated_at in rows
+            ]
+        except Exception as e:
+            logger.warning(f"列出会话失败 {user_id}: {e}")
+            return []
+
     async def delete_state(self, user_id: str, session_id: str) -> bool:
-        """删除指定用户的会话状态记录，返回是否删除成功。"""
+        """删除指定会话（含状态与消息），返回是否删除成功。"""
         if not self._db:
             return False
         cursor = await self._db.execute(
@@ -308,6 +428,19 @@ async def lifespan(app: FastAPI):
             timeout=300.0,
         ),
     )
+
+    # 3.1 对 MCPTool 打补丁：创建时即清理 input_schema
+    #     DeepSeek 不支持 anyOf/exclusiveMinimum 等关键字，
+    #     且 jsonschema 库校验时 exclusiveMinimum:True 会触发 SchemaError。
+    #     在 __init__ 后立即清理，确保 LLM schema 和输入验证都用干净 schema。
+    from agentscope.tool import MCPTool as _MCPTool
+    _orig_mcp_init = _MCPTool.__init__
+
+    def _sanitized_mcp_init(self, *args, **kwargs):
+        _orig_mcp_init(self, *args, **kwargs)
+        _ToolSchemaSanitizer._sanitize(self.input_schema)
+
+    _MCPTool.__init__ = _sanitized_mcp_init
 
     # 4. 创建 Toolkit（MCP 工具 + 计划工具 + 文件读写工具）
     #    Read/Write/Edit 供智能体自主管理长期记忆 Markdown 文件
@@ -409,10 +542,12 @@ app.add_middleware(
 
 
 class ChatAttachment(BaseModel):
-    """用户上传文件的元信息，用于告知 Agent 可用的文件名。"""
+    """用户上传文件的元信息，用于告知 Agent 可用的文件名/路径。"""
     original_name: str
-    extract_filename: str
-    compare_filename: str
+    file_type: str = "pdf"  # "pdf" 或 "image"
+    extract_filename: str | None = None
+    compare_filename: str | None = None
+    file_path: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -438,9 +573,37 @@ async def health():
     }
 
 
+@app.get("/sessions")
+async def list_sessions(user_id: str = Depends(verify_token)):
+    """列出当前用户的所有历史会话（侧边栏数据源）。"""
+    if _session_store is None:
+        return JSONResponse(
+            {"detail": "服务尚未初始化完成"}, status_code=503
+        )
+    return {"sessions": await _session_store.list_sessions(user_id)}
+
+
+@app.get("/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str, user_id: str = Depends(verify_token)
+):
+    """获取指定会话的消息列表（重新打开历史会话时调用）。"""
+    if _session_store is None:
+        return JSONResponse(
+            {"detail": "服务尚未初始化完成"}, status_code=503
+        )
+    session = await _session_store.load_session(user_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {
+        "title": session["title"],
+        "messages": session["messages"],
+    }
+
+
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
-    """删除指定会话的持久化上下文。"""
+    """删除指定会话的持久化上下文（含状态与消息）。"""
     if _session_store is None:
         return JSONResponse(
             {"detail": "服务尚未初始化完成"}, status_code=503
@@ -454,14 +617,13 @@ async def upload_file(
     file: UploadFile = File(...),
     user_id: str = Depends(verify_token),
 ):
-    """上传 PDF 文件，自动转发到文档抽取与文档比对服务。
+    """上传文件，支持 PDF 和图片。
 
-    文件会被同时上传到两个后端服务（各自生成独立的存储文件名），
-    前端在后续 /chat 请求中携带返回的文件名，Agent 即可调用
-    extract_document / compare_documents 工具处理该文件。
+    - PDF：自动转发到文档抽取与文档比对服务，返回 extract_filename 和 compare_filename。
+    - 图片：保存到本地 uploads 目录，返回 file_path 供图搜图工具使用。
 
     Returns:
-        dict: 包含 original_name、extract_filename、compare_filename
+        dict: 包含 original_name、file_type 及对应的文件标识。
     """
     global _extract_token, _extract_token_expires
 
@@ -470,28 +632,41 @@ async def upload_file(
             {"detail": "服务尚未初始化完成"}, status_code=503
         )
 
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名缺失")
 
+    ext = file.filename.lower().rsplit(".", 1)[-1] if "." in file.filename else ""
     content = await file.read()
 
+    if ext == "pdf":
+        return await _upload_pdf(file.filename, content, user_id)
+    elif ext in ("jpg", "jpeg", "png", "bmp", "webp"):
+        return await _upload_image(file.filename, ext, content, user_id)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="仅支持 PDF 和图片文件（jpg/jpeg/png/bmp/webp）",
+        )
+
+
+async def _upload_pdf(filename: str, content: bytes, user_id: str) -> dict:
+    """将 PDF 转发到文档抽取与文档比对服务。"""
     # 上传到 document_extract 服务（需要 JWT 认证）
     try:
         token = await _get_extract_token()
         extract_resp = await _http_client.post(
             f"{DOC_EXTRACT_URL}/doc_upload",
             headers={"Authorization": f"Bearer {token}"},
-            files={"file": (file.filename, content, "application/pdf")},
+            files={"file": (filename, content, "application/pdf")},
         )
         if extract_resp.status_code == 401:
-            # token 过期，重置后重试
             _extract_token = None
             _extract_token_expires = 0.0
             token = await _get_extract_token()
             extract_resp = await _http_client.post(
                 f"{DOC_EXTRACT_URL}/doc_upload",
                 headers={"Authorization": f"Bearer {token}"},
-                files={"file": (file.filename, content, "application/pdf")},
+                files={"file": (filename, content, "application/pdf")},
             )
         extract_resp.raise_for_status()
         extract_filename = extract_resp.json()["saved_name"]
@@ -528,7 +703,7 @@ async def upload_file(
     try:
         compare_resp = await _http_client.post(
             f"{DOC_COMPARE_URL}/upload",
-            files={"file": (file.filename, content, "application/pdf")},
+            files={"file": (filename, content, "application/pdf")},
         )
         compare_resp.raise_for_status()
         compare_filename = compare_resp.json()["saved_name"]
@@ -562,14 +737,29 @@ async def upload_file(
         )
 
     logger.info(
-        f"文件上传成功: user={user_id}, original={file.filename}, "
+        f"PDF 上传成功: user={user_id}, original={filename}, "
         f"extract={extract_filename}, compare={compare_filename}"
     )
-
     return {
-        "original_name": file.filename,
+        "original_name": filename,
+        "file_type": "pdf",
         "extract_filename": extract_filename,
         "compare_filename": compare_filename,
+    }
+
+
+async def _upload_image(filename: str, ext: str, content: bytes, user_id: str) -> dict:
+    """将图片保存到本地 uploads 目录，供图搜图工具使用。"""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{uuid.uuid4().hex}_{int(time.time())}.{ext}"
+    file_path = UPLOAD_DIR / saved_name
+    file_path.write_bytes(content)
+
+    logger.info(f"图片上传成功: user={user_id}, original={filename}, path={file_path}")
+    return {
+        "original_name": filename,
+        "file_type": "image",
+        "file_path": str(file_path),
     }
 
 
@@ -582,6 +772,59 @@ def _user_memory_workdir(user_id: str) -> str:
     """
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", user_id).strip("._-")
     return str(MEMORY_DIR / (safe or "default"))
+
+
+class _ToolSchemaSanitizer(MiddlewareBase):
+    """清理工具 schema 中 DeepSeek 等 LLM 不支持的关键字。
+
+    DeepSeek V4 仅支持 type/description/properties/required/items/enum/default，
+    不支持 anyOf/oneOf/format/minLength/exclusiveMinimum/minItems/additionalProperties 等。
+    此中间件在每次模型调用前用白名单方式递归清理所有工具 schema。
+    """
+
+    # 允许保留的 JSON Schema 关键字
+    _ALLOWED_KEYS = frozenset({
+        "type", "description", "properties", "required",
+        "items", "enum", "default",
+    })
+
+    async def on_model_call(self, agent, input_kwargs, next_handler):
+        tools = input_kwargs.get("tools")
+        if tools:
+            for tool in tools:
+                func = tool.get("function", {})
+                if "parameters" in func:
+                    self._sanitize(func["parameters"])
+        return await next_handler(**input_kwargs)
+
+    @classmethod
+    def _sanitize(cls, schema: dict) -> None:
+        """递归清理 schema：移除不支持的关键字，展开 anyOf/oneOf。"""
+        if not isinstance(schema, dict):
+            return
+
+        # 展开 anyOf/oneOf：用第一个选项替换
+        for union_key in ("anyOf", "oneOf", "allOf"):
+            if union_key in schema:
+                options = schema.pop(union_key)
+                if options and isinstance(options, list):
+                    first = options[0]
+                    if isinstance(first, dict):
+                        for k, v in first.items():
+                            schema.setdefault(k, v)
+
+        # 移除不支持的关键字
+        for key in list(schema.keys()):
+            if key not in cls._ALLOWED_KEYS:
+                schema.pop(key)
+
+        # 递归处理 properties
+        for prop in schema.get("properties", {}).values():
+            cls._sanitize(prop)
+
+        # 递归处理 items
+        if "items" in schema:
+            cls._sanitize(schema["items"])
 
 
 def _create_agent(state: AgentState, user_id: str) -> Agent:
@@ -606,7 +849,7 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
         context_config=_context_config,
         injection_config=_injection_config,
         offloader=_workspace,
-        middlewares=[memory_middleware],
+        middlewares=[memory_middleware, _ToolSchemaSanitizer()],
         state=state,
     )
 
@@ -614,6 +857,98 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
 def _sse(data: dict) -> str:
     """格式化 SSE 事件。"""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _assistant_tool(assistant: dict, call_id: str) -> dict:
+    """按 tool_call_id 取回助手消息中的工具调用条目，不存在则新建。"""
+    for t in assistant["toolCalls"]:
+        if t["id"] == call_id:
+            return t
+    new = {"id": call_id, "name": "", "args": "", "result": "", "done": False}
+    assistant["toolCalls"].append(new)
+    return new
+
+
+def _process_event(event, assistant: dict) -> list[dict]:
+    """将 AgentScope 事件映射为 SSE 负载，同时累积到助手消息。
+
+    单一事件处理入口：SSE 下发与历史消息持久化共用同一份逻辑，
+    避免此前"前端重建 / 后端重建"两处分支各写一遍的冗余与漂移。
+    """
+    event_type = type(event).__name__
+    payloads: list[dict] = []
+
+    if event_type == "ThinkingBlockDeltaEvent":
+        delta = getattr(event, "delta", "") or ""
+        if delta:
+            assistant["thinking"] += delta
+            payloads.append({"type": "thinking", "content": delta})
+
+    elif event_type == "TextBlockDeltaEvent":
+        delta = getattr(event, "delta", "") or ""
+        if delta:
+            assistant["content"] += delta
+            payloads.append({"type": "token", "content": delta})
+
+    elif event_type == "ToolCallStartEvent":
+        cid = getattr(event, "tool_call_id", "")
+        _assistant_tool(assistant, cid)["name"] = getattr(
+            event, "tool_call_name", ""
+        )
+        payloads.append(
+            {"type": "tool_call", "id": cid, "name": getattr(event, "tool_call_name", "")}
+        )
+
+    elif event_type == "ToolCallDeltaEvent":
+        cid = getattr(event, "tool_call_id", "")
+        delta = getattr(event, "delta", "") or ""
+        _assistant_tool(assistant, cid)["args"] += delta
+        payloads.append({"type": "tool_args", "id": cid, "content": delta})
+
+    elif event_type == "ToolResultTextDeltaEvent":
+        cid = getattr(event, "tool_call_id", "")
+        delta = getattr(event, "delta", "") or ""
+        _assistant_tool(assistant, cid)["result"] += delta
+        payloads.append({"type": "tool_result_delta", "id": cid, "content": delta})
+
+    elif event_type == "ToolResultDataDeltaEvent":
+        cid = getattr(event, "tool_call_id", "")
+        url = getattr(event, "url", "") or ""
+        media = getattr(event, "media_type", "") or ""
+        if url:
+            _assistant_tool(assistant, cid)["result"] += f"[文件] {url}\n"
+        payloads.append(
+            {"type": "tool_result_data", "id": cid, "url": url, "media_type": media}
+        )
+
+    elif event_type == "ToolResultEndEvent":
+        cid = getattr(event, "tool_call_id", "")
+        _assistant_tool(assistant, cid)["done"] = True
+        payloads.append(
+            {"type": "tool_result", "id": cid, "state": str(getattr(event, "state", ""))}
+        )
+
+    elif event_type == "HintBlockEvent":
+        hint = getattr(event, "hint", "")
+        if isinstance(hint, list):
+            hint = "".join(getattr(b, "text", "") for b in hint)
+        if hint:
+            assistant["hint"] += hint
+            payloads.append({"type": "hint", "content": hint})
+
+    elif event_type == "ExceedMaxItersEvent":
+        assistant["content"] = "已达最大推理轮数，请尝试简化问题或提供更多信息。"
+        payloads.append({"type": "error", "content": assistant["content"]})
+
+    elif event_type == "ReplyEndEvent":
+        error = getattr(event, "error", None)
+        if error:
+            assistant["content"] = f"处理出错：{error}"
+            payloads.append({"type": "error", "content": str(error)})
+        else:
+            payloads.append({"type": "done", "content": ""})
+
+    return payloads
 
 
 @app.post("/chat/stop")
@@ -637,11 +972,12 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     """与 Agent 对话，返回 SSE 流式响应。
 
     每次请求：
-    1. 加载该 session 的持久化 AgentState（若不存在则新建）
-    2. 用恢复的状态创建 Agent，实现上下文重新注入
-    3. 将 reply_stream 放入独立 Task，通过队列传递事件（支持外部取消）
-    4. 流式返回 Agent 回复
-    5. 回复结束后将更新后的 AgentState 持久化保存
+    1. 加载该 session 的持久化 AgentState（若不存在则新建）与历史消息列表
+    2. 追加用户消息并立即落盘（流式中断也不丢失用户输入）
+    3. 用恢复的状态创建 Agent，实现上下文重新注入
+    4. 将 reply_stream 放入独立 Task，通过队列传递事件（支持外部取消）
+    5. 流式返回 Agent 回复，事件同时累积为助手消息
+    6. 回复结束后将助手消息与更新后的 AgentState 持久化保存
 
     事件类型:
       - thinking:          思维链增量文本
@@ -689,16 +1025,56 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
 
     # 构建用户消息：如有附件，将文件信息追加到消息文本中
     if req.attachments:
-        file_list = "\n".join(
-            f"  - {a.original_name}"
-            f"（extract_filename: {a.extract_filename}, "
-            f"compare_filename: {a.compare_filename}）"
-            for a in req.attachments
-        )
-        message_text = f"{req.message}\n\n[已上传文件]\n{file_list}"
+        file_list = []
+        for a in req.attachments:
+            if a.file_type == "image":
+                file_list.append(
+                    f"  - {a.original_name}（file_path: {a.file_path}）"
+                )
+            else:
+                file_list.append(
+                    f"  - {a.original_name}"
+                    f"（extract_filename: {a.extract_filename}, "
+                    f"compare_filename: {a.compare_filename}）"
+                )
+        message_text = f"{req.message}\n\n[已上传文件]\n" + "\n".join(file_list)
     else:
         message_text = req.message
     user_msg = UserMsg("user", message_text)
+
+    # 加载历史消息列表与标题（后端为唯一真源）
+    session = await _session_store.load_session(user_id, req.session_id)
+    messages_list: list[dict] = session["messages"] if session else []
+    title = session["title"] if session else None
+
+    # 追加用户消息并立即持久化（流式中断时用户输入仍保留）
+    user_seq = len(messages_list) + 1
+    messages_list.append({
+        "id": user_seq,
+        "role": "user",
+        "content": req.message,
+        "attachments": (
+            [{"original_name": a.original_name} for a in req.attachments]
+            if req.attachments else []
+        ),
+        "createdAt": int(time.time() * 1000),
+    })
+    if not title:
+        title = (req.message or "新会话")[:30]
+    await _session_store.save_messages(
+        user_id, req.session_id, title, messages_list
+    )
+
+    # 助手消息累积器：流式事件通过 _process_event 写入此处
+    assistant = {
+        "id": user_seq + 1,
+        "role": "assistant",
+        "content": "",
+        "thinking": "",
+        "hint": "",
+        "toolCalls": [],
+        "createdAt": int(time.time() * 1000),
+    }
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
@@ -728,86 +1104,24 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
 
                 # 用户取消
                 if event is _CANCELLED:
+                    if not assistant["content"]:
+                        assistant["content"] = "（已停止生成）"
                     yield _sse({"type": "stopped", "content": ""})
                     break
 
                 # 异常
                 if isinstance(event, Exception):
                     logger.exception("Agent 处理出错", exc_info=event)
-                    yield _sse({"type": "error", "content": f"处理出错: {str(event)}"})
+                    assistant["content"] = f"处理请求时出错：{event}"
+                    yield _sse({
+                        "type": "error",
+                        "content": f"处理出错: {str(event)}",
+                    })
                     break
 
-                event_type = type(event).__name__
-
-                # DEBUG: 记录所有事件类型
-                logger.info(f"EVENT: {event_type}")
-
-                if event_type == "ThinkingBlockDeltaEvent":
-                    delta = getattr(event, "delta", "")
-                    if delta:
-                        logger.info(f"Thinking delta: {delta[:80]}")
-                        yield _sse({"type": "thinking", "content": delta})
-
-                elif event_type == "TextBlockDeltaEvent":
-                    delta = getattr(event, "delta", "")
-                    if delta:
-                        yield _sse({"type": "token", "content": delta})
-
-                elif event_type == "ToolCallStartEvent":
-                    yield _sse({
-                        "type": "tool_call",
-                        "id": getattr(event, "tool_call_id", ""),
-                        "name": getattr(event, "tool_call_name", ""),
-                    })
-
-                elif event_type == "ToolCallDeltaEvent":
-                    yield _sse({
-                        "type": "tool_args",
-                        "id": getattr(event, "tool_call_id", ""),
-                        "content": getattr(event, "delta", ""),
-                    })
-
-                elif event_type == "ToolResultTextDeltaEvent":
-                    yield _sse({
-                        "type": "tool_result_delta",
-                        "id": getattr(event, "tool_call_id", ""),
-                        "content": getattr(event, "delta", ""),
-                    })
-
-                elif event_type == "ToolResultDataDeltaEvent":
-                    yield _sse({
-                        "type": "tool_result_data",
-                        "id": getattr(event, "tool_call_id", ""),
-                        "url": getattr(event, "url", ""),
-                        "media_type": getattr(event, "media_type", ""),
-                    })
-
-                elif event_type == "ToolResultEndEvent":
-                    yield _sse({
-                        "type": "tool_result",
-                        "id": getattr(event, "tool_call_id", ""),
-                        "state": str(getattr(event, "state", "")),
-                    })
-
-                elif event_type == "HintBlockEvent":
-                    hint = getattr(event, "hint", "")
-                    if isinstance(hint, list):
-                        hint = "".join(
-                            getattr(block, "text", "") for block in hint
-                        )
-                    if hint:
-                        yield _sse({"type": "hint", "content": hint})
-
-                elif event_type == "ExceedMaxItersEvent":
-                    yield _sse({"type": "error", "content": "已达最大推理轮数，请尝试简化问题或提供更多信息。"})
-
-                elif event_type == "ReplyEndEvent":
-                    finished_reason = getattr(event, "finished_reason", "")
-                    error = getattr(event, "error", None)
-                    if error:
-                        yield _sse({"type": "error", "content": str(error)})
-                    else:
-                        yield _sse({"type": "done", "content": ""})
+                # 单一事件处理：下发 SSE + 累积到 assistant
+                for payload in _process_event(event, assistant):
+                    yield _sse(payload)
 
         finally:
             _active_reply_tasks.pop(task_key, None)
@@ -817,7 +1131,11 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
                     await task
                 except asyncio.CancelledError:
                     pass
-            # 持久化更新后的会话状态（含本轮对话上下文）
+            # 持久化助手消息（含本轮思维链/工具调用/回复）与 AgentState
+            messages_list.append(assistant)
+            await _session_store.save_messages(
+                user_id, req.session_id, title, messages_list
+            )
             await _session_store.save_state(user_id, req.session_id, agent.state)
 
     return StreamingResponse(

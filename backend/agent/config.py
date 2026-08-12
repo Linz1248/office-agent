@@ -83,3 +83,6 @@ WORKSPACE_DIR = SERVICE_ROOT / "workspace"
 # 长期记忆配置（AgenticMemoryMiddleware）
 # 每个用户拥有独立子目录，跨会话持久化偏好、决策与知识（Markdown 文件）
 MEMORY_DIR = SERVICE_ROOT / "memory"
+
+# 临时上传目录（用户上传的图片文件，供图搜图工具使用）
+UPLOAD_DIR = SERVICE_ROOT / "uploads"
