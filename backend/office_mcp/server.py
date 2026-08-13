@@ -1,8 +1,10 @@
 """Office MCP Server：将办公功能封装为 MCP 工具供 Agent 调用。
 
 工具列表：
-  - read_document           : 读取已上传 PDF 的全文文本（OCR 结果）
+  - read_document           : 读取已上传文档（PDF/Word/Excel）的全文文本
+  - read_image              : 识别已上传图片中的文字（OCR）
   - extract_document        : 从 PDF 中抽取指定字段
+  - extract_to_excel        : 从已上传文档提取字段生成 Excel 下载链接
   - compare_documents       : 比对两份 PDF 文档
   - list_image_libraries    : 列出图像库索引
   - search_images_by_text   : 通过文字搜索图片
@@ -72,21 +74,30 @@ async def _get_extract_token() -> str:
     return _cached_token
 
 
-async def _extract_post(path: str, payload: dict[str, Any]) -> dict:
-    """向 document_extract 发送 POST 请求，自动处理 401 token 过期重试。"""
+async def _extract_post(
+    path: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    files: dict[str, Any] | None = None,
+) -> dict:
+    """向 document_extract 发 POST（json 或 multipart 文件），自动处理 401 token 过期重试。"""
     global _cached_token, _token_expires
     client = _get_client()
     token = await _get_extract_token()
     url = f"{DOC_EXTRACT_URL}{path}"
-    headers = {"Authorization": f"Bearer {token}"}
 
-    resp = await client.post(url, json=payload, headers=headers)
+    async def _send(tok: str):
+        headers = {"Authorization": f"Bearer {tok}"}
+        if files is not None:
+            return await client.post(url, files=files, headers=headers)
+        return await client.post(url, json=payload, headers=headers)
+
+    resp = await _send(token)
     if resp.status_code == 401:
         _cached_token = None
         _token_expires = 0.0
         token = await _get_extract_token()
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = await client.post(url, json=payload, headers=headers)
+        resp = await _send(token)
     resp.raise_for_status()
     return resp.json()
 
@@ -117,15 +128,17 @@ def _handle_error(e: Exception, service: str) -> str:
 
 @mcp.tool()
 async def read_document(filename: str) -> str:
-    """读取已上传 PDF 文档的全文文本（OCR 结果）。
+    """读取已上传文档的全文文本（PDF/Word/Excel，按扩展名解析）。
 
+    PDF 走 OCR；Word(.docx)/Excel(.xlsx) 走结构化解析；旧版 .doc/.xls 经
+    LibreOffice 转换后解析。Excel 按工作表输出 Markdown 表格。
     适用于用户对上传文档提出一般性请求：解释、总结、问答、翻译、提取要点等。
     调用后由你基于全文直接作答，无需其它工具。
-    需要结构化抽取特定字段时改用 extract_document；需要比对两份文档时改用 compare_documents。
+    需要结构化抽取特定字段时改用 extract_document（仅 PDF）；需要比对两份文档时改用 compare_documents（仅 PDF）。
     超长文本会被框架自动截断并卸载，必要时可按需回查。
 
     Args:
-        filename: 已上传的 PDF 文件名（extract_filename），如 "9f2e1c4f..._1719469876.pdf"。
+        filename: 已上传的文档文件名（extract_filename），如 "9f2e1c4f..._1719469876.pdf" / ".docx" / ".xlsx"。
 
     Returns:
         str: 文档全文文本。
@@ -138,6 +151,38 @@ async def read_document(filename: str) -> str:
 
 
 @mcp.tool()
+async def read_image(file_path: str) -> str:
+    """识别已上传图片中的文字（OCR），返回 Markdown 文本。
+
+    适用于用户上传图片后要求「识别/提取图片里的文字、把图转文字、看图里写了什么」等。
+    调用后由你基于识别出的文本直接作答。需要「以图搜图」改用 search_images_by_image；
+    需要读取文档（PDF/Word/Excel）全文改用 read_document。
+
+    Args:
+        file_path: 已上传的图片文件路径，由文件上传功能返回。
+
+    Returns:
+        str: 图片中识别出的文本（Markdown）。
+    """
+    from pathlib import Path
+    import mimetypes
+
+    path = Path(file_path)
+    if not path.exists():
+        return f"图片文件不存在: {file_path}"
+
+    media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+    content = path.read_bytes()
+    try:
+        result = await _extract_post(
+            "/image_text", files={"file": (path.name, content, media_type)}
+        )
+    except Exception as e:
+        return _handle_error(e, "图片识别")
+    return result.get("text", "")
+
+
+@mcp.tool()
 async def extract_document(
     filename: str,
     fields: list[str],
@@ -145,13 +190,13 @@ async def extract_document(
     fields_enhance: list[str] | None = None,
     fields_template: dict[str, str] | None = None,
 ) -> str:
-    """从 PDF 文档中抽取指定的字段信息。
+    """从 PDF/图片 文档中抽取指定的字段信息。
 
     仅在用户明确要求提取特定字段时调用此工具，不要用于一般性的文件解释。
     调用前需确认用户要提取哪些字段（fields 参数不可为空）。
 
     Args:
-        filename: 已上传的 PDF 文件名（extract_filename），如 "9f2e1c4f..._1719469876.pdf"。
+        filename: 已上传的 PDF/图片 文件名（extract_filename），如 "9f2e1c4f..._1719469876.pdf"。
         fields: 需要抽取的字段名称列表，如 ["合同名称", "签订日期", "甲方", "乙方"]。
         enhance: 是否启用增强抽取模式（使用示例样本提升准确率，默认 False）。
         fields_enhance: 需要增强抽取的字段名列表（仅 enhance=True 时有效）。
@@ -172,6 +217,66 @@ async def extract_document(
     except Exception as e:
         return _handle_error(e, "文档抽取")
     return _truncate(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@mcp.tool()
+async def extract_to_excel(
+    filename: str,
+    fields: list[str] | None = None,
+    template_filename: str | None = None,
+    enhance: bool = False,
+    fields_enhance: list[str] | None = None,
+    fields_template: dict[str, str] | None = None,
+) -> str:
+    """从已上传的目标文档中提取指定字段，生成 Excel 供下载。
+
+    - 传 fields（字段名列表）→ 生成默认「字段 | 值」Excel；
+    - 传 template_filename（已上传的 Excel 模板）→ 按模板「字段名 + 右侧空单元格」
+      自动识别字段，把提取值填入对应右侧位置后下载。
+    两者至少传一个；filename 始终为目标文档（PDF/Word/Excel/图片）的 extract_filename。
+
+    适用场景：用户明确要求「把文档里的字段提取出来并输出/下载成 Excel/表格」时调用。
+    用户上传了 Excel 模板时，用该模板的 extract_filename 作为 template_filename。
+    未上传目标文档时，先提示用户上传。
+
+    Args:
+        filename: 目标文档的 extract_filename（如 "9f2e..._1719469876.pdf"）。
+        fields: 要提取的字段名列表（生成默认表时必填）。
+        template_filename: 已上传 Excel 模板的 extract_filename（填充模板模式时必填）。
+        enhance / fields_enhance / fields_template: 同 extract_document 的增强抽取参数。
+
+    Returns:
+        str: 下载链接 + 各字段提取结果摘要（agent 据此整理为 markdown 下载链接呈现）。
+    """
+    common = {
+        "enhance": enhance,
+        "fields_enhance": fields_enhance or [],
+        "fields_template": fields_template or {},
+    }
+    try:
+        if template_filename:
+            r = await _extract_post("/fill_template", {
+                "filename": filename,
+                "template_filename": template_filename,
+                **common,
+            })
+        elif fields:
+            r = await _extract_post("/extract_to_excel", {
+                "filename": filename,
+                "fields": fields,
+                **common,
+            })
+        else:
+            return "参数错误：需提供 fields（字段列表）或 template_filename（Excel 模板）。"
+    except Exception as e:
+        return _handle_error(e, "字段提取→Excel")
+
+    url = r.get("download_url", "")
+    results = r.get("results", {}) or {}
+    summary = "\n".join(f"- {k}: {v}" for k, v in results.items())
+    if len(summary) > 1500:
+        summary = summary[:1500] + "\n…"
+    return f"下载链接：{url}\n\n提取结果：\n{summary}"
 
 
 # ── 文档比对工具 ──────────────────────────────────────────────

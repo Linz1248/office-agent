@@ -182,11 +182,11 @@
           <input
             ref="fileInput"
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.bmp,.webp"
+            accept=".pdf,.docx,.doc,.xlsx,.xls,.jpg,.jpeg,.png,.bmp,.webp"
             style="display: none"
             @change="handleFileSelect"
           />
-          <button class="upload-btn" @click="triggerFileUpload" :disabled="isWaiting" title="上传 PDF 文件">
+          <button class="upload-btn" @click="triggerFileUpload" :disabled="isWaiting" title="上传 PDF/Word/Excel 文件">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
@@ -221,7 +221,7 @@
             </svg>
           </button>
         </div>
-        <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击回形针上传 PDF 或图片</p>
+        <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击回形针上传 PDF、Word、Excel 或图片</p>
       </footer>
     </div>
   </div>
@@ -360,7 +360,7 @@ const handleFileSelect = async (event) => {
   const files = event.target.files
   if (!files || !files.length) return
 
-  const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp']
+  const allowedExts = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.jpg', '.jpeg', '.png', '.bmp', '.webp']
 
   for (const file of files) {
     const ext = '.' + file.name.toLowerCase().split('.').pop()
@@ -393,6 +393,7 @@ const handleFileSelect = async (event) => {
       att.file_type = data.file_type
       if (data.file_type === 'image') {
         att.file_path = data.file_path
+        if (data.extract_filename) att.extract_filename = data.extract_filename
       } else {
         att.extract_filename = data.extract_filename
         att.compare_filename = data.compare_filename

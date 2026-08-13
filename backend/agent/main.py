@@ -111,9 +111,11 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 你拥有以下工具能力：
 
 文档处理：
-- read_document：读取已上传 PDF 文档的全文文本（OCR 结果，Markdown 格式）。适用于用户对上传文档的一般性请求：解释、总结、问答、翻译、提取要点等。调用后由你基于全文直接作答。
-- extract_document：从已上传的 PDF 文档中抽取指定字段信息（如合同名称、签订日期、甲乙方等）
-- compare_documents：比对两份 PDF 文档的文本和印章差异，输出相似度分数
+- read_document：读取已上传文档的全文文本（PDF 走 OCR；Word .docx/.doc 走结构化解析；Excel .xlsx/.xls 按工作表输出 Markdown 表格）。适用于用户对上传文档的一般性请求：解释、总结、问答、翻译、提取要点等。调用后由你基于全文直接作答。
+- read_image：识别已上传图片中的文字（OCR），返回 Markdown。适用于用户上传图片后要求「识别图片文字、把图转文字、看图里写了什么」等。调用后由你基于识别出的文本直接作答。
+- extract_document：从已上传的 PDF/图片 文档中抽取指定字段信息（如合同名称、签订日期、甲乙方等）（PDF/图片）
+- compare_documents：比对两份 PDF 文档的文本和印章差异，输出相似度分数（仅 PDF）
+- extract_to_excel：从已上传目标文档提取指定字段并生成 Excel 下载链接。传 fields→生成默认「字段|值」表；传 template_filename→按已上传 Excel 模板「字段名+右侧空格」识别字段并填充值到对应位置。目标文档支持 PDF/Word(.docx)/Excel(.xlsx)/图片。
 
 多媒体检索：
 - search_images_by_text：通过文字描述在图像库中搜索相似图片
@@ -126,17 +128,21 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - Read / Write / Edit：读写文件，可用于记录笔记和管理长期记忆
 
 文件上传：
-用户可以在对话框中上传 PDF 文件或图片。上传成功后，消息会附带文件信息：
-- PDF 文件：包含 extract_filename（用于 extract_document）和 compare_filename（用于 compare_documents）
-- 图片文件：包含 file_path（用于 search_images_by_image 的 file_path 参数）
+用户可以在对话框中上传 PDF、Word(.docx/.doc)、Excel(.xlsx/.xls) 或图片。上传成功后，消息会附带文件信息：
+- PDF 文件：包含 extract_filename（用于 read_document / extract_document）和 compare_filename（用于 compare_documents）
+- Word/Excel 文档：包含 extract_filename（用于 read_document）；若该 Excel 是用户提供的字段模板，还可作为 extract_to_excel 的 template_filename
+- 图片文件：包含 file_path（用于 read_image 识别文字，或 search_images_by_image 以图搜图）和 extract_filename（用于 extract_document / extract_to_excel 抽取字段；上传成功即已转发到文档抽取服务）
 如果用户需要文档操作或图搜图但未上传文件，提示用户先上传。
 
 工具调用原则（重要）：
 - 只在用户明确请求需要工具支持的具体操作时才调用工具。例如用户说"提取合同日期"才调用 extract_document，用户说"比对这两份文件"才调用 compare_documents。
-- 用户上传 PDF 后，根据其意图选择处理方式，不要一刀切：
+- 用户上传文档（PDF/Word/Excel）后，根据其意图选择处理方式，不要一刀切：
   · 一般性请求（解释一下、总结、问答、翻译、提取要点、看看这个文件讲什么等）→ 调用 read_document 获取全文，由你直接作答；
-  · 明确要抽取特定字段（如"合同名称/签订日期/甲方"）→ 调用 extract_document，调用前需确认用户要提取哪些字段；
-  · 明确要比对两份文档 → 调用 compare_documents。
+  · 明确要抽取文档特定字段（如"合同名称/签订日期/甲方"，PDF/图片均可）→ 调用 extract_document，调用前需确认用户要提取哪些字段；
+  · 明确要比对两份 PDF 文档 → 调用 compare_documents（仅 PDF）。
+- 用户要求「把文档里的字段提取出来并输出/下载成 Excel/表格」时 → 调用 extract_to_excel：用户指定了字段就传 fields；用户上传了 Excel 模板就把模板的 extract_filename 作为 template_filename、目标文档的 extract_filename 作为 filename。未上传目标文档时先提示用户上传。
+- extract_document / extract_to_excel 的 filename 参数必须是 extract_filename，绝不能传 file_path。若目标文档（含图片）仅有 file_path 而无 extract_filename，说明该文件未成功入库到文档抽取服务，应提示用户重新上传该文件，不要用 file_path 当 filename 盲目重试。
+- 用户上传图片要求识别图片中的文字时 → 调用 read_image 获取 OCR 文本后作答；要按图搜图才用 search_images_by_image。
 - 不要为了使用工具而使用工具。很多问题（如闲聊、知识问答、建议）可以直接回答，无需调用任何工具。
 - 不要编造工具参数。如果工具需要特定参数（如 extract_document 需要 fields 列表），但用户没有提供，先询问用户要提取哪些字段。
 - 工具调用失败时，向用户说明失败原因，不要盲目重试。
@@ -145,6 +151,7 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - 始终使用中文回复，保持简洁专业。
 - 遇到复杂多步任务时，先用 TaskCreate 拆解步骤，再逐步执行。
 - 工具调用后，将结果整理为易读的格式呈现给用户，不要直接输出原始 JSON。
+- extract_to_excel 返回下载链接时，将其整理为 markdown 下载链接呈现给用户（如 [📥 下载提取结果](链接)），并可附上各字段提取值摘要。
 - 信息不足时主动询问，不确定时如实告知，不编造信息。
 """
 
@@ -544,7 +551,7 @@ app.add_middleware(
 class ChatAttachment(BaseModel):
     """用户上传文件的元信息，用于告知 Agent 可用的文件名/路径。"""
     original_name: str
-    file_type: str = "pdf"  # "pdf" 或 "image"
+    file_type: str = "pdf"  # "pdf" / "office" / "image"
     extract_filename: str | None = None
     compare_filename: str | None = None
     file_path: str | None = None
@@ -617,9 +624,10 @@ async def upload_file(
     file: UploadFile = File(...),
     user_id: str = Depends(verify_token),
 ):
-    """上传文件，支持 PDF 和图片。
+    """上传文件，支持 PDF、Word、Excel 和图片。
 
-    - PDF：自动转发到文档抽取与文档比对服务，返回 extract_filename 和 compare_filename。
+    - PDF：转发到文档抽取与文档比对服务，返回 extract_filename 和 compare_filename。
+    - Word/Excel：转发到文档抽取服务，返回 extract_filename（供 read_document）。
     - 图片：保存到本地 uploads 目录，返回 file_path 供图搜图工具使用。
 
     Returns:
@@ -640,64 +648,133 @@ async def upload_file(
 
     if ext == "pdf":
         return await _upload_pdf(file.filename, content, user_id)
+    elif ext in ("docx", "xlsx", "doc", "xls"):
+        return await _upload_office_doc(file.filename, ext, content, user_id)
     elif ext in ("jpg", "jpeg", "png", "bmp", "webp"):
         return await _upload_image(file.filename, ext, content, user_id)
     else:
         raise HTTPException(
             status_code=400,
-            detail="仅支持 PDF 和图片文件（jpg/jpeg/png/bmp/webp）",
+            detail="支持 PDF、Word(.docx/.doc)、Excel(.xlsx/.xls) 和图片（jpg/jpeg/png/bmp/webp）",
         )
+
+
+# document_extract 启动需加载 OCR 模型（数十秒），上传若早于其就绪则连接被拒；
+# 对 ConnectError 退避重试等待其就绪（连不上=未建立连接=无半上传，重试安全）。
+_EXTRACT_CONNECT_RETRY_ATTEMPTS = 4
+_EXTRACT_CONNECT_RETRY_DELAY = 3.0
+
+
+async def _forward_to_extract(filename: str, content: bytes, content_type: str) -> str:
+    """转发文件到 document_extract /doc_upload，返回 saved_name。
+
+    含 JWT 鉴权、401 token 过期重试、ConnectError 退避重试。
+    ConnectError 重试用于应对 document_extract 启动期加载 OCR 模型（数十秒）
+    导致的短暂不可达——连不上即未建立连接、无半上传，重试安全。重试耗尽才抛 502，
+    不再静默置空 extract_filename，避免后续 agent 拿不到文件名而盲目重试。
+    PDF / Word / Excel / 图片 上传共用此函数。
+    """
+    global _extract_token, _extract_token_expires
+    for attempt in range(1, _EXTRACT_CONNECT_RETRY_ATTEMPTS + 1):
+        try:
+            token = await _get_extract_token()
+            resp = await _http_client.post(
+                f"{DOC_EXTRACT_URL}/doc_upload",
+                headers={"Authorization": f"Bearer {token}"},
+                files={"file": (filename, content, content_type)},
+            )
+            if resp.status_code == 401:
+                # token 过期，清除全局缓存重登一次（旧实现误清局部变量，此处修正）
+                _extract_token = None
+                _extract_token_expires = 0.0
+                token = await _get_extract_token()
+                resp = await _http_client.post(
+                    f"{DOC_EXTRACT_URL}/doc_upload",
+                    headers={"Authorization": f"Bearer {token}"},
+                    files={"file": (filename, content, content_type)},
+                )
+            resp.raise_for_status()
+            return resp.json()["saved_name"]
+        except httpx.ConnectError:
+            if attempt < _EXTRACT_CONNECT_RETRY_ATTEMPTS:
+                logger.warning(
+                    "文档抽取服务连接失败（第 %d/%d 次），%gs 后重试...",
+                    attempt, _EXTRACT_CONNECT_RETRY_ATTEMPTS, _EXTRACT_CONNECT_RETRY_DELAY,
+                )
+                await asyncio.sleep(_EXTRACT_CONNECT_RETRY_DELAY)
+                continue
+            logger.exception("文档抽取服务连接失败（已重试 %d 次）", _EXTRACT_CONNECT_RETRY_ATTEMPTS)
+            raise HTTPException(
+                status_code=502,
+                detail="文档抽取服务尚未就绪或不可达，请确认该服务已启动并完成模型加载后重试",
+            )
+        except httpx.TimeoutException:
+            logger.exception("文档抽取服务请求超时")
+            raise HTTPException(
+                status_code=504,
+                detail="文档抽取服务响应超时，请稍后重试",
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "文档抽取服务返回错误: status=%s, body=%s",
+                e.response.status_code,
+                e.response.text[:500],
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"文档抽取服务返回错误 ({e.response.status_code})",
+            )
+        except Exception as e:
+            logger.exception("转发到文档抽取服务时发生意外错误")
+            raise HTTPException(
+                status_code=502,
+                detail=f"上传到文档抽取服务失败: {e}",
+            )
+    # 理论不可达：循环内每路径均 return/continue/raise
+    raise HTTPException(status_code=502, detail="上传到文档抽取服务失败")
+
+
+# Word/Excel 文件的标准 MIME（旧版 .doc/.xls 含在内）
+_OFFICE_CONTENT_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "doc": "application/msword",
+    "xls": "application/vnd.ms-excel",
+}
+
+# 图片标准 MIME（转发到文档抽取服务 /doc_upload 时使用）
+_IMAGE_CONTENT_TYPES = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "bmp": "image/bmp",
+    "webp": "image/webp",
+}
+
+
+async def _upload_office_doc(filename: str, ext: str, content: bytes, user_id: str) -> dict:
+    """将 Word/Excel 文件转发到文档抽取服务（供 read_document 解析全文）。
+
+    Office 文档不做比对，故不转发到 document_compare。
+    """
+    content_type = _OFFICE_CONTENT_TYPES.get(ext, "application/octet-stream")
+    extract_filename = await _forward_to_extract(filename, content, content_type)
+
+    logger.info(
+        f"Office 文档上传成功: user={user_id}, original={filename}, "
+        f"extract={extract_filename}"
+    )
+    return {
+        "original_name": filename,
+        "file_type": "office",
+        "extract_filename": extract_filename,
+        "compare_filename": None,
+    }
 
 
 async def _upload_pdf(filename: str, content: bytes, user_id: str) -> dict:
     """将 PDF 转发到文档抽取与文档比对服务。"""
-    # 上传到 document_extract 服务（需要 JWT 认证）
-    try:
-        token = await _get_extract_token()
-        extract_resp = await _http_client.post(
-            f"{DOC_EXTRACT_URL}/doc_upload",
-            headers={"Authorization": f"Bearer {token}"},
-            files={"file": (filename, content, "application/pdf")},
-        )
-        if extract_resp.status_code == 401:
-            _extract_token = None
-            _extract_token_expires = 0.0
-            token = await _get_extract_token()
-            extract_resp = await _http_client.post(
-                f"{DOC_EXTRACT_URL}/doc_upload",
-                headers={"Authorization": f"Bearer {token}"},
-                files={"file": (filename, content, "application/pdf")},
-            )
-        extract_resp.raise_for_status()
-        extract_filename = extract_resp.json()["saved_name"]
-    except httpx.ConnectError:
-        logger.exception("文档抽取服务连接失败")
-        raise HTTPException(
-            status_code=502,
-            detail="文档抽取服务不可达，请确认该服务已启动",
-        )
-    except httpx.TimeoutException:
-        logger.exception("文档抽取服务请求超时")
-        raise HTTPException(
-            status_code=504,
-            detail="文档抽取服务响应超时，请稍后重试",
-        )
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            "文档抽取服务返回错误: status=%s, body=%s",
-            e.response.status_code,
-            e.response.text[:500],
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"文档抽取服务返回错误 ({e.response.status_code})",
-        )
-    except Exception as e:
-        logger.exception("上传到文档抽取服务时发生意外错误")
-        raise HTTPException(
-            status_code=502,
-            detail=f"上传到文档抽取服务失败: {e}",
-        )
+    extract_filename = await _forward_to_extract(filename, content, "application/pdf")
 
     # 上传到 document_compare 服务（无需认证）
     try:
@@ -749,17 +826,30 @@ async def _upload_pdf(filename: str, content: bytes, user_id: str) -> dict:
 
 
 async def _upload_image(filename: str, ext: str, content: bytes, user_id: str) -> dict:
-    """将图片保存到本地 uploads 目录，供图搜图工具使用。"""
+    """将图片保存到本地 uploads（供图搜图）并转发到文档抽取服务（供字段提取/全文读取）。
+
+    图片同时获得 file_path（图搜图 / read_image）与 extract_filename（extract_document /
+    extract_to_excel / read_document），使其与 PDF/Word/Excel 一样可作为提取目标。
+    转发经 _forward_to_extract 含 ConnectError 退避重试；重试耗尽抛 502（与 PDF/Word/Excel
+    一致地 fail-fast），不再静默置空 extract_filename，避免 agent 拿不到文件名盲目重试。
+    """
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     saved_name = f"{uuid.uuid4().hex}_{int(time.time())}.{ext}"
     file_path = UPLOAD_DIR / saved_name
     file_path.write_bytes(content)
 
-    logger.info(f"图片上传成功: user={user_id}, original={filename}, path={file_path}")
+    content_type = _IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream")
+    extract_filename = await _forward_to_extract(filename, content, content_type)
+
+    logger.info(
+        f"图片上传成功: user={user_id}, original={filename}, "
+        f"path={file_path}, extract={extract_filename}"
+    )
     return {
         "original_name": filename,
         "file_type": "image",
         "file_path": str(file_path),
+        "extract_filename": extract_filename,
     }
 
 
@@ -1028,15 +1118,19 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         file_list = []
         for a in req.attachments:
             if a.file_type == "image":
-                file_list.append(
-                    f"  - {a.original_name}（file_path: {a.file_path}）"
-                )
+                line = f"  - {a.original_name}（file_path: {a.file_path}"
+                if a.extract_filename:
+                    line += f", extract_filename: {a.extract_filename}"
+                line += "）"
+                file_list.append(line)
             else:
-                file_list.append(
-                    f"  - {a.original_name}"
-                    f"（extract_filename: {a.extract_filename}, "
-                    f"compare_filename: {a.compare_filename}）"
-                )
+                # PDF 与 Office 文档均提供 extract_filename；
+                # compare_filename 仅 PDF 有，Office 文档为空时不展示
+                line = f"  - {a.original_name}（extract_filename: {a.extract_filename}"
+                if a.compare_filename:
+                    line += f", compare_filename: {a.compare_filename}"
+                line += "）"
+                file_list.append(line)
         message_text = f"{req.message}\n\n[已上传文件]\n" + "\n".join(file_list)
     else:
         message_text = req.message

@@ -12,6 +12,7 @@ SERVICE_ROOT = Path(__file__).resolve().parent
 UPLOAD_DIR = SERVICE_ROOT / "uploads"
 DATA_DIR = SERVICE_ROOT / "data"          # 样例 PDF 与中间产物（temp.md / prompt.txt）
 LOG_DIR = SERVICE_ROOT / "logs"
+OUTPUT_DIR = SERVICE_ROOT / "output"     # 生成的 Excel（提取结果/填充模板）存放处
 
 # 预训练模型根目录（PaddleOCR PPStructureV3 各模块 + sat 段落切分模型）
 PRETRAINED_MODELS_DIR = Path(
@@ -40,6 +41,11 @@ LLM_SEED = 42
 
 # 服务端口
 PORT = int(os.environ.get("DOC_EXTRACT_PORT", "9090"))
+
+# 对用户/agent 可达的下载基址（默认走网关 /extract 前缀）；
+# office_mcp 与前端都直连此基址取 Excel，故不能用 request.base_url（agent 侧会得内网地址）。
+# 部署到其他域名时用 PUBLIC_EXTRACT_BASE 环境变量覆盖。
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_EXTRACT_BASE", "http://localhost:8080/extract")
 
 # PPStructureV3 各子模块的本地模型目录名（均位于 PRETRAINED_MODELS_DIR 下）
 PP_STRUCTURE_MODEL_DIRS = {

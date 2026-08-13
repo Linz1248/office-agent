@@ -1,6 +1,9 @@
-"""document_extract 服务：基于 PaddleOCR + contextgem(LLM) 的文档字段抽取。
+"""document_extract 服务：文档全文提取与字段抽取。
 
-提供用户注册/登录、PDF 上传/删除、文档字段抽取（支持 OCR 与 LLM 结果缓存）等接口。
+- PDF：PaddleOCR(PPStructure) + contextgem(LLM) 抽取字段，带 OCR/LLM 缓存。
+- Word(.docx)/Excel(.xlsx)：纯 Python(python-docx/openpyxl) 结构化解析为 Markdown。
+- 旧版 .doc/.xls：LibreOffice headless 转为 OOXML 后再解析。
+提供用户注册/登录、文件上传/删除、文档全文读取与字段抽取等接口。
 """
 from __future__ import annotations
 
@@ -12,6 +15,8 @@ import uuid
 import hashlib
 import difflib
 import sqlite3
+import asyncio
+import shutil
 import tempfile
 import traceback
 from pathlib import Path
@@ -20,10 +25,12 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, status, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
+from openpyxl import Workbook, load_workbook
+from urllib.parse import quote
 import bcrypt
 from jose import JWTError, jwt
 import fitz  # PyMuPDF
@@ -43,6 +50,7 @@ import config
 from config import (
     UPLOAD_DIR,
     DATA_DIR,
+    OUTPUT_DIR,
     USERS_DB,
     CACHE_DB,
     CACHE_VERSION,
@@ -58,6 +66,7 @@ from config import (
     PP_STRUCTURE_MODEL_DIRS,
     PRETRAINED_MODELS_DIR,
     PORT,
+    PUBLIC_BASE_URL,
 )
 
 
@@ -84,6 +93,17 @@ PPStructure = PPStructureV3(
     text_det_thresh=0.5,
     device=DEVICE,
 )
+
+# LibreOffice 可用性：旧版 .doc/.xls 依赖 soffice 转换；缺失时仅旧版不可用，
+# 现代格式 .docx/.xlsx 与 PDF 正常工作（启动期探测一次，避免每请求 which）。
+LO_AVAILABLE: bool = shutil.which("soffice") is not None
+
+# 允许 OCR 的图片扩展名
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+# 允许上传的文档扩展名（PDF + 现代/旧版 Office + 图片：图片经 /doc_upload 落盘后
+# 可走 read_document / extract_document / extract_to_excel，与 PDF/Word/Excel 同构）
+_ALLOWED_EXTS = {".pdf", ".docx", ".xlsx", ".doc", ".xls"} | _IMAGE_EXTS
 
 
 # ------------------------------------------------------------------
@@ -151,7 +171,7 @@ def compute_fields_hash(fields: list, enhance: bool,
 
 
 def get_ocr_cache(file_hash: str) -> Optional[str]:
-    """查询 OCR 缓存，命中则返回 Markdown 文本，否则返回 None"""
+    """查询文档文本缓存（ocr_cache 表为通用文本缓存，PDF/Word/Excel 全文共用，按 file_hash 命中），否则返回 None"""
     with get_cache_connection() as conn:
         row = conn.execute(
             "SELECT ocr_text FROM ocr_cache WHERE file_hash=? AND version=?",
@@ -161,7 +181,7 @@ def get_ocr_cache(file_hash: str) -> Optional[str]:
 
 
 def set_ocr_cache(file_hash: str, ocr_text: str):
-    """写入 OCR 缓存"""
+    """写入文档文本缓存（PDF/Word/Excel 全文共用此缓存，按 file_hash 键）"""
     with get_cache_connection() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO ocr_cache (file_hash, version, ocr_text) VALUES (?, ?, ?)",
@@ -195,6 +215,7 @@ async def lifespan(app: FastAPI):
     # 启动阶段：初始化上传目录、数据目录与缓存数据库
     UPLOAD_DIR.mkdir(exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
     init_cache_db()
     init_db()
     yield
@@ -445,13 +466,17 @@ async def change_password(password_change: PasswordChange):
 # ------------------------------------------------------------------
 # 单文件上传接口
 # ------------------------------------------------------------------
-@app.post("/doc_upload", summary="上传单个文件, 当前仅支持PDF文件")
+@app.post("/doc_upload", summary="上传文档（PDF/Word/Excel）")
 async def doc_upload(file: UploadFile = File(...), current_user: str = Depends(verify_token)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件不能为空")
 
-    if Path(file.filename).suffix != ".pdf":
-        raise HTTPException(status_code=400, detail="不支持的文件类型, 只支持PDF文件")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in _ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail="不支持的文件类型，支持 PDF/Word(.docx/.doc)/Excel(.xlsx/.xls)",
+        )
 
     new_name = generate_filename(file.filename)  # <uuid4>_<timestamp>.<ext>
     dest_path = UPLOAD_DIR / new_name
@@ -474,10 +499,7 @@ async def doc_upload(file: UploadFile = File(...), current_user: str = Depends(v
 
 @app.delete("/doc_delete/{filename}", summary="删除指定文件")
 async def doc_delete(filename: str, current_user: str = Depends(verify_token)):
-    if not filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
-
-    file_path = UPLOAD_DIR / filename
+    file_path = _resolve_upload(filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=400, detail="文件不存在")
 
@@ -498,6 +520,27 @@ def generate_filename(original_filename: str) -> str:
     unique_str = uuid.uuid4().hex  # 32 位随机字符串
     ts = str(int(time.time()))  # 当前时间戳
     return f"{unique_str}_{ts}{ext}"
+
+
+def _resolve_upload(filename: str, base: Path = UPLOAD_DIR) -> Path:
+    """安全解析上传文件路径，统一防路径穿越（.. / 绝对路径 / 分隔符）。
+
+    所有从请求取 filename 并拼接上传目录的端点（/doc_text、/doc_extract→do_extract、
+    /doc_delete）都走此函数，避免每处重复实现路径校验。上传为扁平命名（uuid_时间戳.ext），
+    故先拒任何路径分隔符，再做 resolve+is_relative_to 归属校验（双层防御）。
+    返回 base 下解析后的绝对路径；filename 为空或越界时抛 HTTPException(400)。
+    """
+    name = (filename or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+    if "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="非法文件名")
+    base_resolved = base.resolve()
+    dest = (base / name).resolve()
+    # 解析后必须仍位于上传目录内，防 .. 与绝对路径穿越
+    if not dest.is_relative_to(base_resolved):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    return dest
 
 
 def extract_concepts_enhance(file: str, concepts: list, concepts_template: list):
@@ -657,6 +700,376 @@ def extract_pdf_text(file_path: str, file_hash: str | None = None) -> tuple:
     return pdf_text, timing_info
 
 
+def extract_image_text(file_path: str, file_hash: str | None = None) -> tuple:
+    """对图片做 OCR（PPStructure），复用 file_hash 文本缓存。
+
+    PPStructureV3 直接接受图片路径（jpg/png/bmp/webp），无需清洁/双跑/合并。
+    供 /image_text 接口复用，与 PDF/Word/Excel 全文共用 ocr_cache（按 file_hash 键）。
+    """
+    if file_hash:
+        t0 = time.perf_counter()
+        cached = get_ocr_cache(file_hash)
+        query_time = time.perf_counter() - t0
+        if cached is not None:
+            print(f"[图片缓存命中] file_hash={file_hash[:12]}... (查询耗时: {query_time*1000:.2f}ms)")
+            return cached, {"ocr_cache_hit": True, "ocr_time": 0.0,
+                            "ocr_cache_query_time": round(query_time * 1000, 2)}
+    else:
+        query_time = 0.0
+
+    t0 = time.perf_counter()
+    text = _extract_text_by_ppstructure(file_path)
+    ocr_time = time.perf_counter() - t0
+
+    if file_hash:
+        set_ocr_cache(file_hash, text)
+        print(f"[图片缓存写入] file_hash={file_hash[:12]}... (OCR 耗时: {ocr_time:.4f}s)")
+
+    return text, {
+        "ocr_cache_hit": False,
+        "ocr_time": round(ocr_time, 4),
+        "ocr_cache_query_time": round(query_time * 1000, 2),
+    }
+
+
+# ------------------------------------------------------------------
+# Word / Excel 结构化解析（纯 Python，复用 ocr_cache 文本缓存）
+# timing 键与 extract_pdf_text 对齐（ocr_cache_hit / ocr_time /
+# ocr_cache_query_time），便于 /doc_text 统一处理。
+# ------------------------------------------------------------------
+
+# 单元格文本上限，避免单个超长单元格撑爆输出
+_CELL_TEXT_LIMIT = 2000
+# 每个工作表最大行数，超出截断并标注（最终输出另受框架 tool_result_limit 兜底）
+_SHEET_ROW_LIMIT = 1000
+
+
+def _clip_cell(value: Any) -> str:
+    """单元格值归一化为字符串，过长截断，换行替为空格，转义表格分隔符 | 。"""
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) > _CELL_TEXT_LIMIT:
+        text = text[:_CELL_TEXT_LIMIT] + "…"
+    return text.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+
+
+def _table_to_markdown(rows: list[list[str]]) -> str:
+    """将二维行数据渲染为 Markdown 表格。
+
+    首行作表头，第二行 `---` 分隔，其余为数据行；空表返回空串。
+    docx 表格与 xlsx 工作表共用此函数，避免重复渲染逻辑。
+    """
+    norm = [list(r) for r in rows]
+    if not norm:
+        return ""
+    width = max(len(r) for r in norm)
+    for r in norm:  # 补齐不等长行
+        if len(r) < width:
+            r.extend([""] * (width - len(r)))
+    lines = ["| " + " | ".join(norm[0]) + " |",
+             "|" + "|".join(["---"] * width) + "|"]
+    for r in norm[1:]:
+        lines.append("| " + " | ".join(r) + " |")
+    return "\n".join(lines)
+
+
+def extract_docx_text(file_path: str, file_hash: str | None = None) -> tuple:
+    """读取 .docx 全文（python-docx），段落与表格转 Markdown。复用文本缓存。
+
+    Args:
+        file_path: .docx 绝对路径。
+        file_hash: 由调用方预先计算并传入，用于命中文本缓存。
+
+    Returns:
+        tuple: (text, timing_info)
+    """
+    if file_hash:
+        t0 = time.perf_counter()
+        cached = get_ocr_cache(file_hash)
+        query_time = time.perf_counter() - t0
+        if cached is not None:
+            print(f"[Word 缓存命中] file_hash={file_hash[:12]}... (查询耗时: {query_time*1000:.2f}ms)")
+            return cached, {"ocr_cache_hit": True, "ocr_time": 0.0,
+                            "ocr_cache_query_time": round(query_time * 1000, 2)}
+    else:
+        query_time = 0.0
+
+    from docx import Document  # 局部导入：仅解析 Word 时加载
+    t0 = time.perf_counter()
+    doc = Document(file_path)
+    parts: list[str] = []
+    # doc.paragraphs 与 doc.tables 是两套平铺序列（表格不在 paragraphs 中），
+    # 这里取「先所有段落、再所有表格」，对问答/摘要足够（表格内容不丢）。
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            parts.append(text)
+    for table in doc.tables:
+        rows = [[_clip_cell(c.text) for c in row.cells] for row in table.rows]
+        md = _table_to_markdown(rows)
+        if md:
+            parts.append(md)
+    text = "\n\n".join(parts)
+    parse_time = time.perf_counter() - t0
+
+    if file_hash:
+        set_ocr_cache(file_hash, text)
+        print(f"[Word 缓存写入] file_hash={file_hash[:12]}... (解析耗时: {parse_time:.4f}s)")
+
+    return text, {
+        "ocr_cache_hit": False,
+        "ocr_time": round(parse_time, 4),
+        "ocr_cache_query_time": round(query_time * 1000, 2),
+    }
+
+
+def extract_xlsx_text(file_path: str, file_hash: str | None = None) -> tuple:
+    """读取 .xlsx 全文（openpyxl），每个工作表渲染为 Markdown 表格。复用文本缓存。
+
+    data_only=True 取公式缓存值；从未在 Excel/LibreOffice 打开过的公式单元格可能为空。
+    每表最多 _SHEET_ROW_LIMIT 行、每单元格最多 _CELL_TEXT_LIMIT 字符，超出截断并标注。
+    """
+    if file_hash:
+        t0 = time.perf_counter()
+        cached = get_ocr_cache(file_hash)
+        query_time = time.perf_counter() - t0
+        if cached is not None:
+            print(f"[Excel 缓存命中] file_hash={file_hash[:12]}... (查询耗时: {query_time*1000:.2f}ms)")
+            return cached, {"ocr_cache_hit": True, "ocr_time": 0.0,
+                            "ocr_cache_query_time": round(query_time * 1000, 2)}
+    else:
+        query_time = 0.0
+
+    t0 = time.perf_counter()
+    wb = load_workbook(file_path, read_only=True, data_only=True)
+    parts: list[str] = []
+    try:
+        for ws in wb.worksheets:
+            sheet_parts: list[str] = [f"## 工作表: {ws.title}"]
+            rows: list[list[str]] = []
+            truncated = False
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= _SHEET_ROW_LIMIT:
+                    truncated = True
+                    break
+                rows.append([_clip_cell(c) for c in row])
+            md = _table_to_markdown(rows)
+            if md:
+                sheet_parts.append(md)
+            else:
+                sheet_parts.append("（空表）")
+            if truncated:
+                sheet_parts.append(
+                    f"（该工作表超过 {_SHEET_ROW_LIMIT} 行，已截断，仅显示前 {_SHEET_ROW_LIMIT} 行）"
+                )
+            parts.append("\n".join(sheet_parts))
+    finally:
+        wb.close()
+    text = "\n\n".join(parts)
+    parse_time = time.perf_counter() - t0
+
+    if file_hash:
+        set_ocr_cache(file_hash, text)
+        print(f"[Excel 缓存写入] file_hash={file_hash[:12]}... (解析耗时: {parse_time:.4f}s)")
+
+    return text, {
+        "ocr_cache_hit": False,
+        "ocr_time": round(parse_time, 4),
+        "ocr_cache_query_time": round(query_time * 1000, 2),
+    }
+
+
+# ------------------------------------------------------------------
+# 旧版 .doc/.xls：LibreOffice headless 转换为 OOXML 后再走上面的解析器
+# ------------------------------------------------------------------
+
+async def _convert_with_libreoffice(src_path: Path, target_format: str) -> Path:
+    """用 LibreOffice headless 将 .doc/.xls 转为 .docx/.xlsx，返回转换后文件路径。
+
+    每次调用使用独立的 UserInstallation 目录，规避 soffice 并发 profile 锁冲突。
+    缺失 soffice 或转换失败时抛 RuntimeError（由 /doc_text 转成 400 提示）。
+    """
+    if not LO_AVAILABLE:
+        raise RuntimeError("LibreOffice(soffice) 未安装，无法解析旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
+
+    out_dir = Path(tempfile.mkdtemp(prefix="lo-conv-"))
+    profile = f"file:///tmp/lo-profile-{uuid.uuid4().hex}"
+    cmd = [
+        "soffice", "--headless", "--nologo", "--nofirststartwizard",
+        f"-env:UserInstallation={profile}",
+        "--convert-to", target_format,
+        "--outdir", str(out_dir),
+        str(src_path),
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"LibreOffice 转换失败（exit={proc.returncode}）: "
+                f"{stderr.decode(errors='replace')[:300]}"
+            )
+        converted = out_dir / f"{src_path.stem}.{target_format}"
+        if not converted.exists():
+            raise RuntimeError(f"LibreOffice 未生成预期文件: {converted.name}")
+        return converted
+    except FileNotFoundError:
+        raise RuntimeError("LibreOffice(soffice) 未安装，无法解析旧版 .doc/.xls，请另存为 .docx/.xlsx 后上传")
+    except asyncio.TimeoutError:
+        raise RuntimeError("LibreOffice 转换超时（>120s），请重试或另存为 .docx/.xlsx")
+
+
+async def extract_doc_text(file_path: str, file_hash: str | None = None) -> tuple:
+    """读取旧版 .doc：LibreOffice 转 .docx 后解析，按原 file_hash 缓存（命中免转换）。"""
+    query_time = 0.0
+    if file_hash:
+        t0 = time.perf_counter()
+        cached = get_ocr_cache(file_hash)
+        query_time = time.perf_counter() - t0
+        if cached is not None:
+            return cached, {"ocr_cache_hit": True, "ocr_time": 0.0,
+                            "ocr_cache_query_time": round(query_time * 1000, 2)}
+
+    converted = await _convert_with_libreoffice(Path(file_path), "docx")
+    try:
+        text, _ = extract_docx_text(str(converted), None)  # None：不按临时文件 hash 缓存
+    finally:
+        try:
+            converted.unlink(missing_ok=True)
+            converted.parent.rmdir(ignore_errors=True)  # 临时目录为空时清理
+        except OSError:
+            pass
+
+    if file_hash:
+        set_ocr_cache(file_hash, text)  # 按原 .doc 的 hash 缓存，下次命中免转换
+    return text, {
+        "ocr_cache_hit": False,
+        "ocr_time": 0.0,
+        "ocr_cache_query_time": round(query_time * 1000, 2),
+    }
+
+
+async def extract_xls_text(file_path: str, file_hash: str | None = None) -> tuple:
+    """读取旧版 .xls：LibreOffice 转 .xlsx 后解析，按原 file_hash 缓存（命中免转换）。"""
+    query_time = 0.0
+    if file_hash:
+        t0 = time.perf_counter()
+        cached = get_ocr_cache(file_hash)
+        query_time = time.perf_counter() - t0
+        if cached is not None:
+            return cached, {"ocr_cache_hit": True, "ocr_time": 0.0,
+                            "ocr_cache_query_time": round(query_time * 1000, 2)}
+
+    converted = await _convert_with_libreoffice(Path(file_path), "xlsx")
+    try:
+        text, _ = extract_xlsx_text(str(converted), None)
+    finally:
+        try:
+            converted.unlink(missing_ok=True)
+            converted.parent.rmdir(ignore_errors=True)
+        except OSError:
+            pass
+
+    if file_hash:
+        set_ocr_cache(file_hash, text)
+    return text, {
+        "ocr_cache_hit": False,
+        "ocr_time": 0.0,
+        "ocr_cache_query_time": round(query_time * 1000, 2),
+    }
+
+
+# ------------------------------------------------------------------
+# 字段提取取文本分发 + Excel 生成/模板填充助手
+# ------------------------------------------------------------------
+
+def _extract_text_for_concepts(file_path: str, file_hash: str | None) -> tuple:
+    """按扩展名取目标文档全文，供 extract_concepts 喂给 LLM。
+
+    PDF/图片 走 OCR；Word(.docx)/Excel(.xlsx) 走结构化解析（均同步，与原 PDF 路径同构）。
+    旧版 .doc/.xls（异步 LibreOffice）暂不支持字段抽取，提示另存为 .docx/.xlsx。
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext == ".pdf":
+        return extract_pdf_text(file_path, file_hash)
+    if ext == ".docx":
+        return extract_docx_text(file_path, file_hash)
+    if ext == ".xlsx":
+        return extract_xlsx_text(file_path, file_hash)
+    if ext in _IMAGE_EXTS:
+        return extract_image_text(file_path, file_hash)
+    raise HTTPException(
+        status_code=400,
+        detail=f"字段提取暂不支持 {ext}，请上传 PDF/Word(.docx)/Excel(.xlsx)/图片(jpg/png/bmp/webp)",
+    )
+
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _scan_template_fields(template_path: Path) -> tuple[dict, "Workbook"]:
+    """扫描 Excel 模板，返回 ({field_name: [(ws, row, col), ...]}, wb)。
+
+    规则（灵活布局）：非空字符串单元格，且其右侧单元格为空（且不在最末列）→ 视为
+    「字段名 + 右侧空值位」。字段名做 strip + 去尾部冒号（：/:）归一化。
+    天然过滤标题单元格（其右侧通常非空）。单次扫描，避免重复 I/O。
+    """
+    wb = load_workbook(template_path)  # read_write，保留公式与格式
+    cells: dict[str, list] = {}
+    for ws in wb.worksheets:
+        max_col = ws.max_column
+        for row in ws.iter_rows():
+            for cell in row:
+                if not isinstance(cell.value, str) or not cell.value.strip():
+                    continue
+                if cell.column >= max_col:  # 右侧超出已用范围 → 跳过（避免末列表头误判）
+                    continue
+                right = ws.cell(row=cell.row, column=cell.column + 1)
+                if right.value in (None, ""):
+                    name = cell.value.strip().rstrip("：:").strip()
+                    if name:
+                        cells.setdefault(name, []).append((ws, cell.row, cell.column + 1))
+    return cells, wb
+
+
+def _safe_set_cell(ws, row: int, col: int, value) -> None:
+    """写入单元格；若目标位于合并区且非锚点则跳过，避免 openpyxl 写合并非锚点异常。"""
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= row <= rng.max_row and rng.min_col <= col <= rng.max_col:
+            if not (row == rng.min_row and col == rng.min_col):
+                return  # 合并区非锚点，跳过该字段出现
+    ws.cell(row=row, column=col, value=value)
+
+
+def _fill_template(wb, cells: dict, results: dict) -> None:
+    """把 results({field:value}) 写回模板各字段对应的右侧空值位。"""
+    for name, targets in cells.items():
+        v = results.get(name)
+        val = str(v) if v is not None else ""
+        for ws, r, c in targets:
+            _safe_set_cell(ws, r, c, val)
+
+
+def _build_default_excel(results: dict) -> Path:
+    """{field:value} → 2 列「字段 | 值」默认 Excel，存 OUTPUT_DIR，返回路径。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "提取结果"
+    ws.append(["字段", "值"])
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = 48
+    for k, v in results.items():
+        ws.append([str(k), str(v) if v is not None else ""])
+    out = OUTPUT_DIR / generate_filename("extract_result.xlsx")
+    wb.save(out)
+    return out
+
+
 def extract_concepts(file_path: str, fields: list, enhance: bool,
                      fields_enhance: list, fields_template: dict,
                      file_hash: str = None) -> tuple:
@@ -666,8 +1079,8 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
     返回: (result_dict, timing_info)
     """
 
-    # ---------------- OCR 提取全文（复用缓存） ----------------
-    pdf_text, ocr_timing = extract_pdf_text(file_path, file_hash)
+    # ---------------- 取全文（按扩展名分发，复用缓存） ----------------
+    pdf_text, ocr_timing = _extract_text_for_concepts(file_path, file_hash)
 
     # 处理后的pdf内容
     with open(DATA_DIR / "temp.md", "w", encoding="UTF-8") as f:
@@ -762,7 +1175,7 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
 # 执行文档提取操作
 # ------------------------------------------------------------------
 def do_extract(request: DocEtractRequest, upload_dir: Path) -> dict:
-    file_path = upload_dir / request.filename
+    file_path = _resolve_upload(request.filename, upload_dir)
     if not file_path.exists():
         raise FileNotFoundError("文件不存在")
 
@@ -827,24 +1240,45 @@ def do_extract(request: DocEtractRequest, upload_dir: Path) -> dict:
     }
 
 
-@app.post("/doc_text", summary="获取上传文档的全文文本（OCR 结果）")
+@app.post("/doc_text", summary="获取上传文档的全文文本")
 async def doc_text(request: DocTextRequest,
                    current_user: str = Depends(verify_token)) -> Dict[str, Any]:
-    """返回已上传 PDF 的 OCR 全文，供 agent 做问答/摘要/解读等通用处理。
+    """返回已上传文档的全文，供 agent 做问答/摘要/解读等通用处理。
 
-    复用 extract_pdf_text 与 OCR 缓存（与 /doc_extract 共享缓存键），
-    已抽取过的文件读文本可秒回。
+    按扩展名分发：PDF 走 OCR；Word(.docx)/Excel(.xlsx) 走结构化解析；
+    旧版 .doc/.xls 经 LibreOffice 转 OOXML 后再解析。各类全文共用 ocr_cache
+    文本缓存（按 file_hash 键），已读取过的文件秒回。
     """
-    if not request.filename.strip():
-        raise HTTPException(status_code=400, detail="文件名不能为空")
-
-    file_path = UPLOAD_DIR / request.filename
+    file_path = _resolve_upload(request.filename)
     if not file_path.exists():
         raise HTTPException(status_code=400, detail="文件不存在")
 
+    suffix = file_path.suffix.lower()
     try:
         file_hash = compute_file_hash(str(file_path))
-        text, timing = extract_pdf_text(str(file_path), file_hash)
+        if suffix == ".pdf":
+            text, timing = extract_pdf_text(str(file_path), file_hash)
+        elif suffix == ".docx":
+            text, timing = extract_docx_text(str(file_path), file_hash)
+        elif suffix == ".xlsx":
+            text, timing = extract_xlsx_text(str(file_path), file_hash)
+        elif suffix == ".doc":
+            text, timing = await extract_doc_text(str(file_path), file_hash)
+        elif suffix == ".xls":
+            text, timing = await extract_xls_text(str(file_path), file_hash)
+        elif suffix in _IMAGE_EXTS:
+            text, timing = extract_image_text(str(file_path), file_hash)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件类型: {suffix}，支持 PDF/Word(.docx/.doc)/Excel(.xlsx/.xls)/图片(jpg/png/bmp/webp)",
+            )
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        # LibreOffice 未安装/转换失败等：给出可读提示
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"读取文档文本失败：{e}")
@@ -858,11 +1292,51 @@ async def doc_text(request: DocTextRequest,
     }
 
 
+@app.post("/image_text", summary="OCR 识别图片文本")
+async def image_text(file: UploadFile = File(...),
+                     current_user: str = Depends(verify_token)) -> Dict[str, Any]:
+    """对上传图片做 OCR，返回识别出的文本（Markdown）。复用 PPStructure + file_hash 缓存。
+
+    图片由调用方（office_mcp read_image）以 multipart 上传，写到临时文件后 OCR，
+    不落入 UPLOAD_DIR（图片存储在 agent 侧），结束后清理临时文件。
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持图片文件（jpg/jpeg/png/bmp/webp）")
+
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_path = tmp.name
+    try:
+        while chunk := await file.read(1024 * 1024):
+            tmp.write(chunk)
+        tmp.close()  # 落盘并释放写句柄，供 compute_file_hash 与 PPStructure 读取
+        file_hash = compute_file_hash(tmp_path)
+        text, timing = extract_image_text(tmp_path, file_hash)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"图片识别失败：{e}")
+    finally:
+        try:
+            tmp.close()  # 幂等：写入阶段异常时确保关闭
+        except Exception:
+            pass
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    return {
+        "message": "识别成功",
+        "filename": file.filename,
+        "text": text,
+        "chars": len(text),
+        "cache_hit": timing["ocr_cache_hit"],
+    }
+
+
 @app.post("/doc_extract", summary="执行文档提取操作")
 async def doc_extract(request: DocEtractRequest,
                       current_user: str = Depends(verify_token)) -> Dict[str, Any]:
-    if not request.filename.strip():
-        raise HTTPException(status_code=400, detail="文件名不能为空")
     if request.fields is None:
         raise HTTPException(status_code=400, detail="待抽取的字段列表fields不能为空")
 
@@ -886,6 +1360,9 @@ async def doc_extract(request: DocEtractRequest,
     try:
         # 直接同步调用，避免 ThreadPoolExecutor 导致 CUDA 上下文跨线程报错
         result = do_extract(request, UPLOAD_DIR)
+    except HTTPException:
+        # 透传 do_extract 内 _resolve_upload 的 400（非法文件名），不被下方 500 吞掉
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"抽取失败：{str(e)}")
     except Exception as e:
@@ -893,6 +1370,139 @@ async def doc_extract(request: DocEtractRequest,
         raise HTTPException(status_code=500, detail=f"抽取失败：{e}")
 
     return result
+
+
+# ------------------------------------------------------------------
+# 字段提取 → Excel 下载
+# ------------------------------------------------------------------
+
+class ExtractExcelRequest(BaseModel):
+    filename: str
+    fields: List[str]
+    enhance: bool = False
+    fields_enhance: List[str] = []
+    fields_template: dict = {}
+    display_name: str | None = None  # 下载文件名（可选）
+
+
+class FillTemplateRequest(BaseModel):
+    filename: str            # 目标文档 saved_name
+    template_filename: str   # Excel 模板 saved_name
+    enhance: bool = False
+    fields_enhance: List[str] = []
+    fields_template: dict = {}
+    display_name: str | None = None
+
+
+@app.get("/download/{filename}", summary="下载生成的 Excel")
+async def download_excel(filename: str, name: str | None = None):
+    """公开下载 OUTPUT_DIR 下的生成 Excel（文件名为不可猜 uuid）。
+
+    供前端页面与 agent（经 office_mcp 返回的 download_url）直接浏览器下载；
+    不要求 JWT（与 document_compare 的 /get_file 一致），靠不可猜文件名保护。
+    """
+    path = _resolve_upload(filename, OUTPUT_DIR)  # 复用路径穿越防御，base=OUTPUT_DIR
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    disp = name or filename
+    return FileResponse(
+        path=path,
+        media_type=_XLSX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{quote(disp)}"'},
+    )
+
+
+@app.post("/extract_to_excel", summary="提取字段→默认 Excel 下载")
+async def extract_to_excel(req: ExtractExcelRequest,
+                           current_user: str = Depends(verify_token)) -> Dict[str, Any]:
+    """从目标文档提取指定字段，生成 2 列「字段|值」默认 Excel 供下载。
+
+    复用 do_extract（含 LLM/OCR 缓存）。目标文档支持 PDF/Word(.docx)/Excel(.xlsx)。
+    """
+    fields = [f.strip() for f in req.fields if f and f.strip()]
+    if not fields:
+        raise HTTPException(status_code=400, detail="字段列表不能为空")
+    dr = DocEtractRequest(
+        filename=req.filename, fields=fields, enhance=req.enhance,
+        fields_enhance=req.fields_enhance, fields_template=req.fields_template,
+    )
+    try:
+        res = do_extract(dr, UPLOAD_DIR)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=f"提取失败：{str(e)}")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"提取失败：{e}")
+
+    out = _build_default_excel(res["results"])
+    url = f"{PUBLIC_BASE_URL}/download/{out.name}?name={quote(req.display_name or '字段提取结果.xlsx')}"
+    return {
+        "message": "提取成功",
+        "filename": out.name,
+        "download_url": url,
+        "results": res["results"],
+        "cache_hit": res["timing"].get("cache_hit"),
+    }
+
+
+@app.post("/fill_template", summary="按 Excel 模板提取并填充→下载")
+async def fill_template(req: FillTemplateRequest,
+                        current_user: str = Depends(verify_token)) -> Dict[str, Any]:
+    """按用户上传的 Excel 模板「字段名 + 右侧空单元格」识别字段，从目标文档提取后
+    把值填回各字段右侧位置，另存为 Excel 供下载（不覆盖原模板）。
+
+    目标文档支持 PDF/Word(.docx)/Excel(.xlsx)；模板仅支持 .xlsx（.xls 需另存为 .xlsx）。
+    """
+    template_path = _resolve_upload(req.template_filename, UPLOAD_DIR)
+    if template_path.suffix.lower() not in (".xlsx", ".xls"):
+        raise HTTPException(status_code=400, detail="模板须为 Excel(.xlsx/.xls)")
+    if template_path.suffix.lower() == ".xls":
+        raise HTTPException(
+            status_code=400,
+            detail="旧版 .xls 模板暂不支持，请另存为 .xlsx 后上传",
+        )
+    if not template_path.exists():
+        raise HTTPException(status_code=400, detail="模板文件不存在")
+
+    try:
+        cells, wb = _scan_template_fields(template_path)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=f"模板解析失败：{e}")
+    if not cells:
+        raise HTTPException(
+            status_code=400,
+            detail="模板未识别到待填字段（需含「字段名 + 右侧空单元格」结构）",
+        )
+
+    dr = DocEtractRequest(
+        filename=req.filename, fields=list(cells.keys()), enhance=req.enhance,
+        fields_enhance=req.fields_enhance, fields_template=req.fields_template,
+    )
+    try:
+        res = do_extract(dr, UPLOAD_DIR)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=f"提取失败：{str(e)}")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"提取失败：{e}")
+
+    _fill_template(wb, cells, res["results"])
+    out = OUTPUT_DIR / generate_filename("filled.xlsx")
+    wb.save(out)
+    url = f"{PUBLIC_BASE_URL}/download/{out.name}?name={quote(req.display_name or '模板填充结果.xlsx')}"
+    return {
+        "message": "填充成功",
+        "filename": out.name,
+        "download_url": url,
+        "results": res["results"],
+        "fields_found": list(cells.keys()),
+        "cache_hit": res["timing"].get("cache_hit"),
+    }
 
 
 @app.post("/doc_test", summary="测试接口")

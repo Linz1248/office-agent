@@ -3,6 +3,10 @@
 #
 # paddlepaddle-gpu 需通过专用索引安装，例如：
 #   pip install paddlepaddle-gpu==3.0.0 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
+#
+# 旧版 .doc/.xls 解析需宿主安装 LibreOffice (soffice)，例如：
+#   apt install libreoffice
+# 缺失时仅旧版不可用（/doc_text 返回明确提示），.docx/.xlsx/.pdf 正常工作。
 
 fastapi==0.140.7
 uvicorn==0.51.0
@@ -16,3 +20,6 @@ python-jose==3.5.0
 email-validator==2.3.0
 pydantic==2.13.4
 python-multipart==0.0.32
+# Word(.docx)/Excel(.xlsx) 结构化解析（纯 Python wheel，与 paddlepaddle-gpu 无冲突）
+python-docx==1.1.2
+openpyxl==3.1.5
