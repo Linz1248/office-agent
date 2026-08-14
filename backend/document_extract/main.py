@@ -68,6 +68,130 @@ from config import (
     PORT,
     PUBLIC_BASE_URL,
 )
+from contextgem.internal.exceptions import LLMExtractionError
+import contextgem.internal.utils as _cg_utils
+import contextgem.internal.base.llms as _cg_llms
+
+
+# ------------------------------------------------------------------
+# contextgem JSON 解析兼容补丁
+#
+# 本地小模型（如 myaniu/qwen2.5-1m:14b）常把 JSON 包在 ```json 围栏里、并在前后
+# 夹带自然语言（实测默认输出即 ` ```json\n{...}\n``` `）。而 contextgem 的
+# _parse_llm_output_as_json 仅匹配「覆盖整段输出」的 `^```json...```$` 围栏，一旦模型
+# 在围栏外带任何文字即解析失败 → parsed_json=None → 连续重试 3 次后抛
+# LLMExtractionError → 上层 500，字段提取/Excel 下载全部失败。
+#
+# 此处用更宽松的解析器替换该函数（仅增强、绝不回归：任何一步成功即返回，全失败则
+# 回退原 contextgem 解析器）。DocumentLLM 不向 litellm 透传 response_format，故无法
+# 在请求层强制 ollama 的 format=json，只能从解析层兜底。
+# ------------------------------------------------------------------
+# 保存原函数引用（补丁前捕获），作为最终兜底，保证不破坏原本能解析的输入。
+_ORIG_PARSE_LLM_OUTPUT = getattr(_cg_llms, "_parse_llm_output_as_json", None)
+
+
+def _extract_first_balanced_json(s: str):
+    """从 s 中截取首个完整的 {...} 或 [...] 子串。
+
+    感知双引号字符串与反斜杠转义，避免字符串内的 { } [ ] 干扰括号配对计数。
+    """
+    for i, ch in enumerate(s):
+        if ch not in "{[":
+            continue
+        close = "}" if ch == "{" else "]"
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(i, len(s)):
+            c = s[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == ch:
+                depth += 1
+            elif c == close:
+                depth -= 1
+                if depth == 0:
+                    return s[i : j + 1]
+        # 本轮起始括号未闭合，继续尝试下一个起始位置
+    return None
+
+
+def _tolerant_json_fix(s: str) -> str:
+    """保守地修复常见 JSON 瑕疵：仅去尾随逗号（,} / ,] 前的多余逗号）。
+
+    不做单引号→双引号等可能破坏字符串内容的激进替换，避免把原本能解析的内容改坏。
+    """
+    return re.sub(r",\s*([}\]])", r"\1", s)
+
+
+def _robust_parse_llm_output_as_json(output_str):
+    """宽松版 LLM 输出 JSON 解析：兼容 ```json 围栏、前后自然语言、尾随逗号。
+
+    多策略递进，任一成功即返回；全部失败回退原 contextgem 解析器（绝不回归）。
+    """
+    if output_str is None:
+        return None
+    if isinstance(output_str, (dict, list)):
+        return output_str
+    if not isinstance(output_str, str):
+        return None
+
+    # 1. 直接解析
+    try:
+        return json.loads(output_str)
+    except Exception:
+        pass
+
+    # 收集候选 JSON 片段：围栏块 + 首个完整 {...}/[...]
+    candidates = []
+    for m in re.findall(r"```(?:json|JSON)?\s*([\s\S]*?)```", output_str):
+        candidates.append(m)
+    balanced = _extract_first_balanced_json(output_str)
+    if balanced:
+        candidates.append(balanced)
+
+    for c in candidates:
+        cc = c.strip()
+        # 2. 候选直接解析
+        try:
+            return json.loads(cc)
+        except Exception:
+            pass
+        # 3. 候选去尾随逗号后解析
+        try:
+            return json.loads(_tolerant_json_fix(cc))
+        except Exception:
+            pass
+
+    # 4. 整段去尾随逗号后解析
+    try:
+        return json.loads(_tolerant_json_fix(output_str.strip()))
+    except Exception:
+        pass
+
+    # 5. 回退原 contextgem 解析器（绝不回归）
+    if _ORIG_PARSE_LLM_OUTPUT is not None:
+        return _ORIG_PARSE_LLM_OUTPUT(output_str)
+    return None
+
+
+if _ORIG_PARSE_LLM_OUTPUT is not None:
+    # 关键：llms.py 通过 `from ...utils import _parse_llm_output_as_json` 把名字绑定
+    # 到自身模块命名空间，调用处（llms.py:1529）用的是该模块级绑定，故须直接改 llms
+    # 模块的属性；同时改 utils 模块属性，覆盖其他直接从 utils 导入的调用方。
+    _cg_llms._parse_llm_output_as_json = _robust_parse_llm_output_as_json
+    _cg_utils._parse_llm_output_as_json = _robust_parse_llm_output_as_json
+    print("[contextgem 兼容补丁] 已启用宽松 JSON 解析（兼容本地模型围栏/散文包裹输出）")
+else:
+    print("[contextgem 兼容补丁] 未找到 _parse_llm_output_as_json，跳过（contextgem 版本可能已变）")
 
 
 # 密码加密规则：直接使用 bcrypt（passlib 1.7.4 与 bcrypt>=4 不兼容），$2b$ 哈希与旧 passlib 哈希互通
@@ -1109,11 +1233,16 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
         seed=LLM_SEED,
     )
 
-    extracted_concepts = llm.extract_concepts_from_document(doc)
-
     res = {}
-    if len(extracted_concepts[0].extracted_items) > 0:
-        res = extracted_concepts[0].extracted_items[0].value
+    try:
+        extracted_concepts = llm.extract_concepts_from_document(doc)
+        if extracted_concepts and len(extracted_concepts[0].extracted_items) > 0:
+            res = extracted_concepts[0].extracted_items[0].value
+    except LLMExtractionError as e:
+        # JsonObjectConcept 的结构（含 justification/reference）较复杂，本地小模型偶发
+        # 无法产出可解析 JSON；宽松解析器已尽力救回，仍失败则降级为逐字段 StringConcept
+        # （输出结构更简单，更易被小模型正确产出）。
+        print(f"+++++++ JsonObjectConcept 抽取失败，降级 StringConcept：{e} +++++++")
 
     if not res:
         print("+++++++++ 切换 concept 类型 ++++++++++")
@@ -1121,9 +1250,17 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
             StringConcept(name=f, description=f"提取出文档中所有的{f}")
             for f in fields
         ]
-        extracted_concepts = llm.extract_concepts_from_document(doc, max_items_per_call=50)
-        for concept in extracted_concepts:
-            res[concept.name] = ", ".join(item.value for item in concept.extracted_items)
+        try:
+            extracted_concepts = llm.extract_concepts_from_document(doc, max_items_per_call=50)
+            for concept in extracted_concepts:
+                res[concept.name] = ", ".join(item.value for item in concept.extracted_items)
+        except LLMExtractionError as e:
+            # 降级仍失败：模型确实无法产出有效 JSON。宁可给出明确错误，也不返回全空
+            # Excel 误导用户。该 HTTPException 经 do_extract → 各端点 except HTTPException 透传。
+            raise HTTPException(
+                status_code=502,
+                detail="模型未能解析为有效 JSON，字段抽取失败。请稍后重试，或在 config.py 中更换更强的 OLLAMA_MODEL。",
+            ) from e
 
     prompt = llm.get_usage()[-1].usage.calls[-1].prompt
     # 输入模型的文本提示
