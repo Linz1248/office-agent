@@ -47,6 +47,15 @@ PORT = int(os.environ.get("DOC_EXTRACT_PORT", "9090"))
 # 部署到其他域名时用 PUBLIC_EXTRACT_BASE 环境变量覆盖。
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_EXTRACT_BASE", "http://localhost:8080/extract")
 
+# 定时清理保留期（单位：天），均可经环境变量覆盖；置 0 关闭对应清理
+# 活跃会话（分钟级）远短于文件保留期（天级），故不会被误删
+CLEANUP_FILE_DAYS = float(os.environ.get("CLEANUP_FILE_DAYS", "7"))    # 上传/输出文件保留
+CLEANUP_CACHE_DAYS = float(os.environ.get("CLEANUP_CACHE_DAYS", "14"))  # cache.db 行保留
+CLEANUP_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_INTERVAL_SECONDS", "3600"))  # 清理周期（秒）
+CLEANUP_LOGS_MAX_MB = float(os.environ.get("CLEANUP_LOGS_MAX_MB", "10"))  # 单个日志文件上限（MB），超出保留尾部
+# 各服务日志统一落在 backend/logs/<name>.log（见 start_all.sh）
+LOGS_DIR = SERVICE_ROOT.parent / "logs"
+
 # PPStructureV3 各子模块的本地模型目录名（均位于 PRETRAINED_MODELS_DIR 下）
 PP_STRUCTURE_MODEL_DIRS = {
     "text_detection_model_dir": "PP-OCRv5_server_det_infer",

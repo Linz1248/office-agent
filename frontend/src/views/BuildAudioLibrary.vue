@@ -1,216 +1,315 @@
 <template>
-    <div class="page-container">
-        <h1 class="page-title">构建音频索引库</h1>
-        <div class="library-content">
-            <el-row :gutter="24">
-                <el-col :span="5">
-                    <div class="index-list-card">
-                        <div class="section-title">现有索引库</div>
-                        <div class="index-list">
-                            <div v-for="item in indexLibary" :key="item" class="index-item">
-                                <span class="index-dot"></span>
-                                {{ item }}
-                            </div>
-                            <div v-if="indexLibary.length === 0" class="index-empty">暂无索引库</div>
-                        </div>
-                    </div>
-                </el-col>
+  <div class="page-container">
+    <div class="retrieval-page">
+      <header class="retrieval-header">
+        <h1 class="page-title"><span class="title-accent" />音频库管理</h1>
+        <p class="page-desc">只需管理目录与音频；上传自动转写、删除后同名索引自动重建，无需手动操作。</p>
+      </header>
 
-                <el-col :span="19">
-                    <div class="build-card">
-                        <div class="section-title">上传音频并构建索引库</div>
-                        <el-form :model="form" label-width="100px" class="build-form">
-                            <el-form-item label="文件夹名称" required>
-                                <el-input v-model="form.folderName" placeholder="只能字母、数字、下划线" />
-                            </el-form-item>
+      <div v-if="error" class="retrieval-state is-error card">
+        <div class="state-icon">⚠</div>
+        <div class="state-title">加载失败</div>
+        <div class="state-hint">{{ error }}</div>
+      </div>
 
-                            <el-form-item label="选择音频">
-                                <el-upload
-                                    ref="uploadRef"
-                                    drag
-                                    multiple
-                                    accept="audio/wav,audio/mp3"
-                                    :auto-upload="false"
-                                    :file-list="fileList"
-                                    :on-change="handleChange"
-                                    :on-remove="handleRemove"
-                                >
-                                    <i class="el-icon-upload" />
-                                    <div class="el-upload__text">
-                                        将文件拖到此处，或 <em>点击选择</em>
-                                    </div>
-                                </el-upload>
-                            </el-form-item>
+      <div v-else-if="loading" class="retrieval-state retrieval-loading card">
+        <div class="spinner" />
+        <div class="state-title">加载库目录…</div>
+      </div>
 
-                            <el-form-item>
-                                <el-button type="primary" :loading="uploading" @click="submit">
-                                    上传并构建
-                                </el-button>
-                            </el-form-item>
-                        </el-form>
-                    </div>
-                </el-col>
-            </el-row>
-        </div>
+      <div v-else class="library-layout">
+        <aside class="lib-sidebar">
+          <div class="card" style="padding: var(--space-md)">
+            <div class="lib-section">
+              <div class="lib-section-head">
+                <div class="lib-section-title">目录</div>
+                <button class="lib-add-btn" :disabled="busy" @click="promptCreate">+ 新建</button>
+              </div>
+              <div v-if="!folders.length" class="text-muted" style="font-size: 12px">暂无文件夹</div>
+              <div class="lib-folder-list">
+                <div
+                  v-for="f in folders"
+                  :key="f.name"
+                  class="lib-folder-item"
+                  :class="{ active: f.name === selectedFolder }"
+                  @click="selectFolder(f.name)"
+                >
+                  <span>{{ f.name }}</span>
+                  <span class="fc">{{ f.count }} 段</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </aside>
+
+        <section class="lib-main card" style="padding: var(--space-lg)">
+          <div class="build-status">
+            <template v-if="progress.active">
+              <span class="sync-label">正在重建「{{ progress.index_name }}」索引 · 提取文本特征…</span>
+              <el-progress class="sync-progress" :indeterminate="true" :stroke-width="8" :show-text="false" />
+            </template>
+            <span v-else class="sync-ok">✓ 索引已同步</span>
+          </div>
+
+          <div class="lib-toolbar">
+            <span class="control-label">上传到</span>
+            <el-input v-model="uploadFolder" class="folder-input" placeholder="文件夹名" :disabled="busy" />
+            <label class="upload-trigger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              选择音频
+              <input ref="fileInput" type="file" multiple accept=".mp3,.wav,.m4a" hidden :disabled="busy" @change="onPick" />
+            </label>
+            <div v-if="pendingUpload.length" class="file-chips">
+              <span v-for="(f, i) in pendingUpload" :key="i" class="file-chip">
+                <span class="chip-name" :title="f.name">{{ f.name }}</span>
+                <span class="chip-remove" @click="removePending(i)">×</span>
+              </span>
+            </div>
+            <el-button type="primary" :disabled="busy || !pendingUpload.length" @click="doUpload">上传</el-button>
+            <el-popconfirm
+              :title="`确认删除选中的 ${selectedFiles.size} 个音频？`"
+              :disabled="!selectedFiles.size || busy"
+              @confirm="deleteSelected"
+            >
+              <template #reference>
+                <el-button type="danger" plain :disabled="!selectedFiles.size || busy">删除选中 ({{ selectedFiles.size }})</el-button>
+              </template>
+            </el-popconfirm>
+          </div>
+
+          <div v-if="busy" class="retrieval-state retrieval-loading" style="padding: var(--space-xl)">
+            <div class="spinner" />
+            <div class="state-title">{{ busyText }}</div>
+            <div class="state-hint">大音频转写较慢，请耐心等待。</div>
+          </div>
+          <div v-else-if="!selectedFolder" class="retrieval-state" style="padding: var(--space-xl)">
+            <div class="state-icon">📁</div>
+            <div class="state-title">选择左侧文件夹查看内容</div>
+            <div class="state-hint">或「+ 新建」目录，直接上传音频也会自动创建。</div>
+          </div>
+          <div v-else-if="!currentFiles.length" class="retrieval-state" style="padding: var(--space-xl)">
+            <div class="state-icon">🔊</div>
+            <div class="state-title">该文件夹为空</div>
+            <div class="state-hint">上传音频后会自动转写并重建索引。</div>
+          </div>
+          <div v-else>
+            <div
+              v-for="f in currentFiles"
+              :key="f.path"
+              class="audio-row"
+              :class="{ selected: selectedFiles.has(f.path) }"
+            >
+              <input
+                class="row-check"
+                type="checkbox"
+                :checked="selectedFiles.has(f.path)"
+                @change="toggleSelect(f.path)"
+              />
+              <audio :src="f.url" controls preload="none" />
+              <span class="audio-name" :title="f.name">{{ f.name }}</span>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
+  </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import { ElMessage, ElLoading } from 'element-plus'
-import request from "@/utils/request";
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import request from '@/utils/request'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import config from '/config'
 
+const BASE = config.multimodel
 
-const indexLibary = ref([])
+const folders = ref([])
+const selectedFolder = ref('')
+const selectedFiles = ref(new Set())
+const uploadFolder = ref('')
+const pendingUpload = ref([])
+const fileInput = ref(null)
+const loading = ref(true)
+const error = ref('')
+const busy = ref(false)
+const busyText = ref('处理中…')
+const progress = ref({ active: false, index_name: '' })
+
+const countFiles = (node) => {
+  if (!node) return 0
+  if (node.type === 'file') return 1
+  return (node.children || []).reduce((s, c) => s + countFiles(c), 0)
+}
+const flattenFiles = (node, folder) => {
+  const out = []
+  if (!node) return out
+  for (const c of node.children || []) {
+    if (c.type === 'file') {
+      out.push({ name: c.name, path: `${folder}/${c.name}` })
+    } else if (c.type === 'dir') {
+      out.push(...flattenFiles(c, `${folder}/${c.name}`))
+    }
+  }
+  return out
+}
+
+const currentFiles = computed(() => {
+  const f = folders.value.find((x) => x.name === selectedFolder.value)
+  if (!f) return []
+  return f.files.map((x) => ({ ...x, url: `${BASE}/audios/${x.path}` }))
+})
+
 const init = () => {
-  request.get('/', { serverName: 'docExtract' })
-    .then(res => {
-      if (res.status != 200)
-        return
+  loading.value = true
+  error.value = ''
+  request
+    .get('/get_audios_dir/?include_files=true', { serverName: 'multimodel' })
+    .then((res) => {
+      const tree = res.data.repositories || []
+      folders.value = tree.map((node) => ({
+        name: node.name,
+        count: countFiles(node),
+        files: flattenFiles(node, node.name),
+      }))
+      if (!selectedFolder.value && folders.value.length) {
+        selectFolder(folders.value[0].name)
+      }
     })
-  indexLibary.value = []
-    request.get('/get_audios_dir/?include_files=true', {serverName: 'multimodel'}).then(res => {
-        if (res.status === 200){
-            const indices = res.data.indices
-            for (let i = 0; i < indices.length; i++) {
-                const indice_name = indices[i].name
-                const indice_split = indice_name.split('.')[0]
-                indexLibary.value.push(indice_split)
-            }
-        } else {
-            ElMessage.error('初始化失败')
-        }
+    .catch((err) => {
+      error.value = err?.response?.data?.detail || err.message || '请求失败'
+    })
+    .finally(() => {
+      loading.value = false
     })
 }
 init()
 
-
-const form = reactive({
-  folderName: ''
-})
-
-const fileList = ref([])
-const uploadRef = ref(null)
-const uploading = ref(false)
-let loadingInstance = null
-
-const handleChange = (uploadFile, uploadFiles) => {
-  fileList.value = uploadFiles
-}
-const handleRemove = (uploadFile, uploadFiles) => {
-  fileList.value = uploadFiles
-}
-
-const submit = async () => {
-  if (!form.folderName.trim()) {
-    ElMessage.error('请输入文件夹名称')
-    return
-  }
-  if (fileList.value.length === 0) {
-    ElMessage.error('请至少选择一个音频')
-    return
-  }
-
-  const formData = new FormData()
-  formData.append('folder_name', form.folderName.trim())
-
-  fileList.value.forEach(({ raw }) => {
-    if (raw) formData.append('files', raw)
-  })
-
-  uploading.value = true
-
-  const loadingInstance = ElLoading.service({
-    lock: true,
-    text: '构建中，请稍候…',
-    background: 'rgba(0, 0, 0, 0.5)'
-  })
-
-  try {
-    const uploadRes = await request.post('/upload_audios/', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      serverName: 'multimodel'
+let pollTimer = null
+let wasActive = false
+const pollProgress = () => {
+  request
+    .get('/build_progress/?kind=audio', { serverName: 'multimodel' })
+    .then((res) => {
+      progress.value = res.data || {}
+      const active = !!(res.data && res.data.active)
+      if (!active && wasActive) init()
+      wasActive = active
     })
+    .catch(() => {})
+}
+const startPolling = () => {
+  pollTimer = setInterval(pollProgress, 1000)
+}
+const stopPolling = () => {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+}
+onMounted(startPolling)
+onUnmounted(stopPolling)
 
-    if (uploadRes.status === 200) {
-      const params = new URLSearchParams()
-      params.append('folder_names', [form.folderName.trim()])
-      params.append('index_name', form.folderName.trim())
+const selectFolder = (name) => {
+  selectedFolder.value = name
+  uploadFolder.value = name
+  selectedFiles.value = new Set()
+}
 
-      const buildRes = await request.post(`/build_audios_index/?${params.toString()}`, null, {
-        serverName: 'multimodel'
-      })
+const toggleSelect = (path) => {
+  const s = new Set(selectedFiles.value)
+  if (s.has(path)) s.delete(path)
+  else s.add(path)
+  selectedFiles.value = s
+}
 
-      if (buildRes.status === 200) {
-        init()
-        form.folderName = ''
-        uploadRef.value.clearFiles()
-        ElMessage.success('构建成功')
-      }
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || e.message || '上传或构建失败')
-  } finally {
-    uploading.value = false
-    loadingInstance.close()
+const onPick = (e) => {
+  pendingUpload.value = Array.from(e.target.files || [])
+}
+const removePending = (i) => {
+  pendingUpload.value.splice(i, 1)
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+const promptCreate = () => {
+  ElMessageBox.prompt('请输入文件夹名', '新建目录', {
+    confirmButtonText: '创建',
+    cancelButtonText: '取消',
+    inputPattern: /^[^/\\]+$/,
+    inputErrorMessage: '名称不能包含 / 或 \\',
+  })
+    .then(({ value }) => createFolder(value.trim()))
+    .catch(() => {})
+}
+
+const createFolder = (name) => {
+  busy.value = true
+  request
+    .post(`/create_folder/?kind=audio&folder_name=${encodeURIComponent(name)}`, null, {
+      serverName: 'multimodel',
+    })
+    .then(() => {
+      ElMessage.success(`已创建目录 ${name}`)
+      selectedFolder.value = name
+      init()
+    })
+    .catch((err) => {
+      ElMessage.error(err?.response?.data?.detail || '创建失败')
+    })
+    .finally(() => {
+      busy.value = false
+    })
+}
+
+const doUpload = () => {
+  const folder = (uploadFolder.value || '').trim()
+  if (!folder) {
+    ElMessage.warning('请输入目标文件夹名')
+    return
   }
+  if (!pendingUpload.value.length) return
+  busy.value = true
+  busyText.value = '上传并转写中…'
+  const form = new FormData()
+  form.append('folder_name', folder)
+  pendingUpload.value.forEach((f) => form.append('files', f, f.name))
+  request
+    .post('/upload_audios/', form, { serverName: 'multimodel', timeout: 1200000 })
+    .then(() => {
+      ElMessage.success(`已上传 ${pendingUpload.value.length} 个音频并转写`)
+      pendingUpload.value = []
+      if (fileInput.value) fileInput.value.value = ''
+      if (!folders.value.find((x) => x.name === folder)) selectedFolder.value = folder
+      init()
+    })
+    .catch((err) => {
+      ElMessage.error(err?.response?.data?.detail || '上传失败')
+    })
+    .finally(() => {
+      busy.value = false
+    })
+}
+
+const deleteSelected = () => {
+  if (!selectedFiles.value.size) return
+  busy.value = true
+  busyText.value = '删除中…'
+  const qs = [...selectedFiles.value].map((p) => `name=${encodeURIComponent(p)}`).join('&')
+  request
+    .post(`/delete_audios/?target=repo&${qs}`, null, { serverName: 'multimodel', timeout: 120000 })
+    .then(() => {
+      ElMessage.success('已删除选中音频')
+      selectedFiles.value = new Set()
+      init()
+    })
+    .catch((err) => {
+      ElMessage.error(err?.response?.data?.detail || '删除失败')
+    })
+    .finally(() => {
+      busy.value = false
+    })
 }
 </script>
-
-<style scoped>
-.library-content {
-  max-width: 1100px;
-}
-
-.index-list-card {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--mist);
-  padding: var(--space-md);
-  box-shadow: var(--shadow-xs);
-}
-
-.index-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: var(--space-sm);
-}
-
-.index-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--mist-light);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  color: var(--slate);
-}
-
-.index-dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.index-empty {
-  font-size: 13px;
-  color: var(--slate-light);
-  padding: 8px 12px;
-}
-
-.build-card {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--mist);
-  padding: var(--space-lg);
-  box-shadow: var(--shadow-xs);
-}
-
-.build-form {
-  margin-top: var(--space-md);
-}
-</style>

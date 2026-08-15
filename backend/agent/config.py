@@ -86,3 +86,12 @@ MEMORY_DIR = SERVICE_ROOT / "memory"
 
 # 临时上传目录（用户上传的图片文件，供图搜图工具使用）
 UPLOAD_DIR = SERVICE_ROOT / "uploads"
+
+# 定时清理保留期（单位：天），均可经环境变量覆盖；置 0 关闭对应清理
+# - CLEANUP_FILE_DAYS：agent/uploads/ 图片（file_path）与 workspace/ 任务草稿目录保留期
+# - CLEANUP_SESSION_DAYS：sessions.db 会话行（按 updated_at，epoch 毫秒）保留期
+# 活跃会话（分钟级）远短于保留期（天级），故不会被误删。
+# 长期记忆 memory/ 永不清理（见 cleanup.py，与 workspace 同级但不在清理范围）。
+CLEANUP_FILE_DAYS = float(os.environ.get("CLEANUP_FILE_DAYS", "7"))
+CLEANUP_SESSION_DAYS = float(os.environ.get("CLEANUP_SESSION_DAYS", "30"))
+CLEANUP_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_INTERVAL_SECONDS", "3600"))

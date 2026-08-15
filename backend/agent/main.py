@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -59,6 +60,11 @@ from agentscope.mcp import MCPClient, HttpMCPConfig
 from agentscope.middleware import AgenticMemoryMiddleware, MiddlewareBase
 from agentscope.state import AgentState
 from agentscope.permission import PermissionContext, PermissionMode
+from agentscope.event import (
+    RequireExternalExecutionEvent,
+    ExternalExecutionResultEvent,
+)
+from agentscope.message import TextBlock, ToolResultBlock, ToolResultState
 from agentscope.tool import (
     Toolkit,
     TaskCreate,
@@ -95,6 +101,8 @@ from config import (
     WORKSPACE_DIR,
 )
 from llm_config import get_model_and_formatter, get_memory_model
+import cleanup  # 定时清理（上传图片/过期会话/工作区，不含 memory）
+from ask_user import AskUser  # human-in-loop 外部工具（检索前追问补全信息）
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -118,10 +126,10 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - extract_to_excel：从已上传目标文档提取指定字段并生成 Excel 下载链接。传 fields→生成默认「字段|值」表；传 template_filename→按已上传 Excel 模板「字段名+右侧空格」识别字段并填充值到对应位置。目标文档支持 PDF/Word(.docx)/Excel(.xlsx)/图片。
 
 多媒体检索：
-- search_images_by_text：通过文字描述在图像库中搜索相似图片
-- search_images_by_image：通过上传的图片搜索相似图片（以图搜图）
-- search_audios_by_text：通过文字描述在音频库中搜索匹配的音频片段
-- list_image_libraries / list_audio_libraries：查看可用的图像/音频库索引
+- search_images_by_text：通过文字描述在图像库中搜索相似图片（图像索引默认 index_name=global）
+- search_images_by_image：通过上传的图片搜索相似图片（以图搜图，图像索引默认 global）
+- search_audios_by_text：通过文字描述在音频库中搜索匹配的音频片段（音频索引默认 index_name=base，注意音频不是 global）
+- list_image_libraries / list_audio_libraries：查看可用的图像/音频库索引（不确定索引名时先调用查看）
 
 任务管理与文件操作：
 - TaskCreate / TaskUpdate / TaskList / TaskGet：创建和跟踪任务计划，适合复杂多步任务
@@ -146,6 +154,8 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - 不要为了使用工具而使用工具。很多问题（如闲聊、知识问答、建议）可以直接回答，无需调用任何工具。
 - 不要编造工具参数。如果工具需要特定参数（如 extract_document 需要 fields 列表），但用户没有提供，先询问用户要提取哪些字段。
 - 工具调用失败时，向用户说明失败原因，不要盲目重试。
+- 若工具返回「文件不存在或已过期」「可能已被定时清理」等提示，说明用户先前上传的文件因长期未使用被定时清理。请向用户说明该文件已过期并请其重新上传，不要用原文件名（extract_filename/file_path/compare_filename）反复重试。
+- 多媒体检索（search_images_by_text / search_images_by_image / search_audios_by_text）的 human-in-loop：若用户已明确「搜索关键词」和「期望返回数量」，直接调用对应检索工具（数量作为 top_k）；若二者之一缺失（如只说"找几张起重机的图"但没说几张），先调用 ask_user 工具向用户追问（例如 question="请补充：搜索关键词，以及想要返回多少条结果", options=["3 条","5 条","10 条"]），拿到用户作答后再调用检索工具。检索结果（图片/音频）会以画廊形式自动展示给用户，你只需用一句话概述检索结果，不要复述文件路径。
 
 工作原则：
 - 始终使用中文回复，保持简洁专业。
@@ -375,11 +385,19 @@ _context_config: ContextConfig | None = None
 _injection_config: InjectionConfig | None = None
 _workspace: LocalWorkspace | None = None
 _session_store: SessionStore | None = None
+_cleanup_task = None  # 定时清理后台任务句柄（lifespan 中创建/取消）
 
 # 活跃回复任务注册表：key = "user_id:session_id"，用于支持停止输出
 _active_reply_tasks: dict[str, asyncio.Task] = {}
 # 中断哨兵：放入队列表示用户已取消
 _CANCELLED = object()
+
+# human-in-loop 追问注册表：key = reply_id，value = asyncio.Future[str]。
+# agent 调 ask_user 外部工具 → RequireExternalExecutionEvent 暂停 → 此处登记 future；
+# 前端 POST /chat/answer set_result(answer) → run_reply 用答案构造 ExternalExecutionResultEvent 恢复。
+_pending_clarifies: dict[str, asyncio.Future] = {}
+# 追问等待超时（秒）：超时则用兜底答案恢复，避免回复永久挂起。
+_CLARIFY_TIMEOUT = float(os.environ.get("CLARIFY_TIMEOUT", "300"))
 
 # 文档服务 HTTP 客户端（在 lifespan 中初始化）
 _http_client: httpx.AsyncClient | None = None
@@ -413,7 +431,7 @@ async def _get_extract_token() -> str:
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时创建共享资源，关闭时清理。"""
     global _model, _memory_model, _toolkit, _react_config, _context_config
-    global _injection_config, _workspace, _session_store, _http_client
+    global _injection_config, _workspace, _session_store, _http_client, _cleanup_task
 
     logger.info("正在初始化 AI 办公搭子 Agent...")
     logger.info(f"LLM 提供商: {LLM_PROVIDER}, thinking_enable: {LLM_THINKING_ENABLE}")
@@ -460,6 +478,7 @@ async def lifespan(app: FastAPI):
             Read(),
             Write(),
             Edit(),
+            AskUser(),
         ],
         mcps=[mcp_client],
     )
@@ -509,9 +528,16 @@ async def lifespan(app: FastAPI):
         timeout=httpx.Timeout(300.0, connect=10.0),
     )
 
+    # 11. 启动定时清理任务（上传图片/过期会话/工作区；不含 memory 长期记忆）
+    _cleanup_task = await cleanup.start()
+
     logger.info("AI 办公搭子 Agent 初始化完成")
 
     yield
+
+    # 关闭定时清理任务
+    await cleanup.stop(_cleanup_task)
+    _cleanup_task = None
 
     # 关闭文档服务 HTTP 客户端
     if _http_client:
@@ -565,6 +591,11 @@ class ChatRequest(BaseModel):
 
 class StopRequest(BaseModel):
     session_id: str
+
+
+class ClarifyAnswerRequest(BaseModel):
+    reply_id: str
+    answer: str
 
 
 @app.get("/health")
@@ -959,6 +990,25 @@ def _assistant_tool(assistant: dict, call_id: str) -> dict:
     return new
 
 
+# 检索类工具：结果为结构化 JSON，前端以画廊渲染，故不下发原始 tool_result_delta，
+# 改在 ToolResultEndEvent 解析 items 下发独立 retrieval 帧。
+_RETRIEVAL_TOOLS = {
+    "search_images_by_text",
+    "search_images_by_image",
+    "search_audios_by_text",
+}
+
+
+def _is_retrieval_tool(name: str) -> bool:
+    """判断工具名是否属于检索类工具。
+
+    agentscope 会把 MCP 工具改名为 `mcp__{server}__{tool}`（见
+    tool/_adapters.py:219），故取末段（最后一个 `__` 之后）与检索工具集匹配，
+    避免 server 名变化导致失配。
+    """
+    return (name or "").rsplit("__", 1)[-1] in _RETRIEVAL_TOOLS
+
+
 def _process_event(event, assistant: dict) -> list[dict]:
     """将 AgentScope 事件映射为 SSE 负载，同时累积到助手消息。
 
@@ -999,7 +1049,10 @@ def _process_event(event, assistant: dict) -> list[dict]:
         cid = getattr(event, "tool_call_id", "")
         delta = getattr(event, "delta", "") or ""
         _assistant_tool(assistant, cid)["result"] += delta
-        payloads.append({"type": "tool_result_delta", "id": cid, "content": delta})
+        # 检索工具结果为结构化 JSON：仍累积供结束时解析，但不下发增量，
+        # 避免前端工具区显示原始 JSON（画廊帧已足够）。
+        if not _is_retrieval_tool(_assistant_tool(assistant, cid)["name"]):
+            payloads.append({"type": "tool_result_delta", "id": cid, "content": delta})
 
     elif event_type == "ToolResultDataDeltaEvent":
         cid = getattr(event, "tool_call_id", "")
@@ -1013,10 +1066,38 @@ def _process_event(event, assistant: dict) -> list[dict]:
 
     elif event_type == "ToolResultEndEvent":
         cid = getattr(event, "tool_call_id", "")
-        _assistant_tool(assistant, cid)["done"] = True
-        payloads.append(
-            {"type": "tool_result", "id": cid, "state": str(getattr(event, "state", ""))}
-        )
+        tool = _assistant_tool(assistant, cid)
+        tool["done"] = True
+        # 检索工具：解析累积的结构化 JSON，下发 retrieval 画廊帧。
+        if _is_retrieval_tool(tool["name"]):
+            items = None
+            try:
+                parsed = json.loads(tool["result"]) if tool["result"] else None
+                if isinstance(parsed, dict):
+                    items = parsed.get("items")
+            except (json.JSONDecodeError, TypeError):
+                items = None
+            if isinstance(items, list):
+                # 累积到助手消息（随会话持久化，重开历史会话时恢复画廊），
+                # 并把工具区结果替换为易读摘要，避免历史里显示原始 JSON。
+                assistant.setdefault("results", []).extend(items)
+                tool["result"] = str(parsed.get("summary") or "")
+                payloads.append({"type": "retrieval", "id": cid, "items": items})
+                payloads.append(
+                    {"type": "tool_result", "id": cid, "state": str(getattr(event, "state", ""))}
+                )
+            else:
+                # 解析失败：回退为普通工具结果展示。
+                payloads.append(
+                    {"type": "tool_result_delta", "id": cid, "content": tool["result"]}
+                )
+                payloads.append(
+                    {"type": "tool_result", "id": cid, "state": str(getattr(event, "state", ""))}
+                )
+        else:
+            payloads.append(
+                {"type": "tool_result", "id": cid, "state": str(getattr(event, "state", ""))}
+            )
 
     elif event_type == "HintBlockEvent":
         hint = getattr(event, "hint", "")
@@ -1038,7 +1119,87 @@ def _process_event(event, assistant: dict) -> list[dict]:
         else:
             payloads.append({"type": "done", "content": ""})
 
+    elif event_type == "RequireExternalExecutionEvent":
+        # human-in-loop：ask_user 外部工具调用 → 暂停，向前端下发追问帧。
+        # 答案经 POST /chat/answer 回填 future 后，run_reply 用 ExternalExecutionResultEvent 恢复。
+        reply_id = getattr(event, "reply_id", "") or ""
+        tool_calls = getattr(event, "tool_calls", []) or []
+        question = "请补充所需信息："
+        options: list = []
+        tool_call_id = ""
+        if tool_calls:
+            tc = tool_calls[0]
+            tool_call_id = getattr(tc, "id", "") or ""
+            try:
+                inp = json.loads(getattr(tc, "input", "") or "{}")
+                q = inp.get("question")
+                if isinstance(q, str) and q.strip():
+                    question = q.strip()
+                opt = inp.get("options")
+                if isinstance(opt, list):
+                    options = [str(o) for o in opt]
+            except Exception:
+                pass
+        payloads.append({
+            "type": "clarify",
+            "reply_id": reply_id,
+            "tool_call_id": tool_call_id,
+            "question": question,
+            "options": options,
+        })
+        # 同步累积到助手消息：随会话持久化，重开历史会话时可恢复追问块
+        assistant["clarify"] = {
+            "reply_id": reply_id,
+            "tool_call_id": tool_call_id,
+            "question": question,
+            "options": options,
+            "answered": False,
+            "answer": "",
+        }
+
     return payloads
+
+
+def _build_resume_event(event, answer: str) -> ExternalExecutionResultEvent:
+    """把用户的追问作答封装为 ExternalExecutionResultEvent，供 reply_stream 续流。"""
+    tool_calls = getattr(event, "tool_calls", []) or []
+    return ExternalExecutionResultEvent(
+        reply_id=getattr(event, "reply_id", "") or "",
+        execution_results=[
+            ToolResultBlock(
+                id=getattr(tc, "id", "") or "",
+                name=getattr(tc, "name", "ask_user") or "ask_user",
+                output=[TextBlock(text=answer)],
+                state=ToolResultState.SUCCESS,
+            )
+            for tc in tool_calls
+        ] or [
+            ToolResultBlock(
+                id="",
+                name="ask_user",
+                output=[TextBlock(text=answer)],
+                state=ToolResultState.SUCCESS,
+            )
+        ],
+    )
+
+
+async def _await_clarify_answer(reply_id: str, user_id: str) -> str:
+    """登记 future 等待用户作答（POST /chat/answer 回填）；超时返回兜底答案。
+
+    future 与 /chat/answer 同处一个事件循环，set_result 安全。按 user_id+reply_id
+    隔离，避免跨用户作答。
+    """
+    key = f"{user_id}:{reply_id}"
+    future = asyncio.get_running_loop().create_future()
+    _pending_clarifies[key] = future
+    try:
+        return await asyncio.wait_for(future, _CLARIFY_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(f"追问超时未作答 user={user_id} reply_id={reply_id}")
+        return "（用户未及时作答，已取消本次追问，请重新提问）"
+    finally:
+        _pending_clarifies.pop(key, None)
 
 
 @app.post("/chat/stop")
@@ -1055,6 +1216,22 @@ async def stop_chat(req: StopRequest, user_id: str = Depends(verify_token)):
         logger.info(f"停止 Agent 输出: user={user_id}, session={req.session_id}")
         return {"status": "ok", "stopped": True}
     return {"status": "ok", "stopped": False}
+
+
+@app.post("/chat/answer", summary="回答 human-in-loop 追问")
+async def chat_answer(req: ClarifyAnswerRequest, user_id: str = Depends(verify_token)):
+    """回填 ask_user 追问的答案，恢复被暂停的回复流。
+
+    按 user_id+reply_id 取回 future；不存在或已过期（超时/取消）返回 404。
+    """
+    key = f"{user_id}:{req.reply_id}"
+    future = _pending_clarifies.get(key)
+    if future is None or future.done():
+        return JSONResponse(
+            {"detail": "追问已过期或不存在"}, status_code=404
+        )
+    future.set_result(req.answer)
+    return {"ok": True}
 
 
 @app.post("/chat")
@@ -1159,7 +1336,8 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         user_id, req.session_id, title, messages_list
     )
 
-    # 助手消息累积器：流式事件通过 _process_event 写入此处
+    # 助手消息累积器：流式事件通过 _process_event 写入此处。
+    # results/clarify 一并持久化，重新打开历史会话时可恢复检索画廊与追问作答。
     assistant = {
         "id": user_seq + 1,
         "role": "assistant",
@@ -1168,16 +1346,51 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         "hint": "",
         "toolCalls": [],
         "createdAt": int(time.time() * 1000),
+        "results": [],    # 检索画廊 items（图片/音频）
+        "clarify": None,  # human-in-loop 追问 {question, options, answered, answer}
     }
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
 
         async def run_reply():
-            """在独立 Task 中消费 reply_stream，将事件放入队列。"""
+            """在独立 Task 中消费 reply_stream，将事件放入队列。
+
+            遇 RequireExternalExecutionEvent（ask_user 追问）时暂停，等待
+            POST /chat/answer 回填答案后，用 ExternalExecutionResultEvent 续流——
+            新开一段 reply_stream(resume_event) 继续推理，实现单次会话内 human-in-loop。
+            """
             try:
-                async for event in agent.reply_stream(user_msg, yield_final_msg=True):
-                    await queue.put(event)
+                iterator = agent.reply_stream(user_msg, yield_final_msg=True)
+                while True:
+                    paused = False
+                    async for event in iterator:
+                        await queue.put(event)
+                        if isinstance(event, RequireExternalExecutionEvent):
+                            answer = await _await_clarify_answer(
+                                getattr(event, "reply_id", "") or "", user_id
+                            )
+                            # 记录作答到助手消息（随会话持久化，重开时恢复"问题->回答"折叠行）
+                            clar = assistant.get("clarify")
+                            if not isinstance(clar, dict):
+                                clar = assistant["clarify"] = {
+                                    "reply_id": getattr(event, "reply_id", "") or "",
+                                    "tool_call_id": "",
+                                    "question": "",
+                                    "options": [],
+                                    "answered": False,
+                                    "answer": "",
+                                }
+                            clar["answered"] = True
+                            clar["answer"] = answer
+                            resume_event = _build_resume_event(event, answer)
+                            iterator = agent.reply_stream(
+                                resume_event, yield_final_msg=True
+                            )
+                            paused = True
+                            break
+                    if not paused:
+                        break  # 迭代器正常耗尽
             except asyncio.CancelledError:
                 queue.put_nowait(_CANCELLED)
             except Exception as e:

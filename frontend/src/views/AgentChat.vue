@@ -122,7 +122,7 @@
 
             <!-- 消息气泡 -->
             <div class="message-bubble" :class="msg.role">
-              <template v-if="msg.role === 'assistant' && msg.loading && !msg.thinking && !msg.toolCalls.length">
+              <template v-if="msg.role === 'assistant' && msg.loading && !msg.thinking && !msg.toolCalls.length && !msg.clarify">
                 <span class="typing-dots">
                   <span></span><span></span><span></span>
                 </span>
@@ -143,6 +143,46 @@
                 </div>
                 <div v-if="msg.content" class="message-text">{{ msg.content }}</div>
               </template>
+
+              <!-- human-in-loop 追问块（agent 调 ask_user 暂停时出现） -->
+              <div v-if="msg.clarify && !msg.clarify.answered" class="clarify-block">
+                <div class="clarify-question">{{ msg.clarify.question }}</div>
+                <div v-if="msg.clarify.options && msg.clarify.options.length" class="clarify-chips">
+                  <button
+                    v-for="opt in msg.clarify.options"
+                    :key="opt"
+                    class="suggestion-chip"
+                    @click="submitClarify(msg, opt)"
+                  >{{ opt }}</button>
+                </div>
+                <div class="clarify-input-row">
+                  <input
+                    class="clarify-input"
+                    v-model="msg.clarify.draft"
+                    placeholder="或输入你的回答…"
+                    @keydown.enter.prevent="submitClarify(msg, msg.clarify.draft)"
+                  />
+                  <button
+                    class="clarify-send"
+                    :disabled="!(msg.clarify.draft || '').trim()"
+                    @click="submitClarify(msg, msg.clarify.draft)"
+                  >发送</button>
+                </div>
+                <div v-if="msg.clarify.error" class="clarify-error">{{ msg.clarify.error }}</div>
+              </div>
+              <!-- 已作答：折叠为单行摘要，收起交互块 -->
+              <div v-else-if="msg.clarify && msg.clarify.answered" class="clarify-answered-line">
+                <span class="clarify-answered-icon">✓</span>
+                <span class="clarify-answered-q">{{ msg.clarify.question }}</span>
+                <span class="clarify-answered-arrow">→</span>
+                <span class="clarify-answered-a">{{ msg.clarify.answer }}</span>
+              </div>
+
+              <!-- 检索结果画廊（图片缩略图/音频播放器，折叠避免占满窗口） -->
+              <RetrievalGallery
+                v-if="msg.role === 'assistant' && msg.results && msg.results.length"
+                :items="msg.results"
+              />
             </div>
           </div>
         </div>
@@ -233,6 +273,7 @@ import { useUserStore } from '@/stores/user'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import config from '/config'
+import RetrievalGallery from '@/components/RetrievalGallery.vue'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -296,6 +337,11 @@ const loadSession = async (id) => {
       ...m,
       loading: false,
       thinkingExpanded: false,
+      // 检索画廊 + human-in-loop 追问随会话持久化恢复（旧消息无这些字段时归一化）
+      results: Array.isArray(m.results) ? m.results : [],
+      clarify: m.clarify
+        ? { ...m.clarify, draft: m.clarify.draft || '', error: '' }
+        : null,
     }))
     // 同步本地计数器，避免新消息 id 与历史消息冲突
     msgId = Math.max(0, ...messages.value.map(m => Number(m.id) || 0))
@@ -429,6 +475,33 @@ const stopGeneration = async () => {
   }
 }
 
+// human-in-loop：提交追问作答，恢复被暂停的回复流
+const submitClarify = async (msg, answer) => {
+  const a = (answer || '').trim()
+  if (!a || msg.clarify.answered) return
+  try {
+    const resp = await fetch(`${config.agent}/chat/answer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': store.getBearerToken,
+      },
+      body: JSON.stringify({ reply_id: msg.clarify.reply_id, answer: a }),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      msg.clarify.error = err.detail || '追问已过期，请重新提问'
+      return
+    }
+    msg.clarify.answered = true
+    msg.clarify.answer = a
+    msg.clarify.draft = ''
+    msg.clarify.error = ''
+  } catch (e) {
+    msg.clarify.error = '提交失败，请重试'
+  }
+}
+
 const sendMessage = async () => {
   const text = inputText.value.trim()
   const readyAttachments = attachedFiles.value.filter(f => !f.uploading && !f.error)
@@ -467,6 +540,8 @@ const sendMessage = async () => {
     hint: '',
     toolCalls: [],
     thinkingExpanded: true,
+    clarify: null,   // human-in-loop 追问 {reply_id, question, options, answered, answer, draft}
+    results: [],     // 检索画廊 items（图片/音频）
   })
   scrollToBottom()
 
@@ -531,6 +606,21 @@ const sendMessage = async () => {
         } else if (data.type === 'tool_result_data') {
           const tool = target.toolCalls.find(t => t.id === data.id)
           if (tool && data.url) tool.result += `[文件] ${data.url}\n`
+        } else if (data.type === 'clarify') {
+          // human-in-loop：agent 调 ask_user 暂停，前端弹追问块，用户作答后续流
+          target.clarify = {
+            reply_id: data.reply_id,
+            tool_call_id: data.tool_call_id,
+            question: data.question,
+            options: data.options || [],
+            answered: false,
+            answer: '',
+            draft: '',
+            error: '',
+          }
+        } else if (data.type === 'retrieval') {
+          // 检索工具结构化结果 → 画廊
+          target.results.push(...(data.items || []))
         } else if (data.type === 'tool_result') {
           const tool = target.toolCalls.find(t => t.id === data.id)
           if (tool) tool.done = true
@@ -817,6 +907,95 @@ const sendMessage = async () => {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* ── human-in-loop 追问块 ── */
+.clarify-block {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.clarify-question {
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: var(--space-sm);
+  line-height: 1.5;
+}
+.clarify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+.clarify-chips .suggestion-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.clarify-input-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+.clarify-input {
+  flex: 1;
+  padding: 6px 12px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.clarify-input:focus { border-color: var(--accent); }
+.clarify-input:disabled { opacity: 0.6; }
+.clarify-send {
+  padding: 6px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.clarify-send:hover:not(:disabled) { background: var(--accent-hover); }
+.clarify-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.clarify-error {
+  margin-top: var(--space-xs);
+  font-size: 12px;
+  color: var(--danger);
+}
+/* 已作答：折叠为单行摘要，收起交互块 */
+.clarify-answered-line {
+  margin-top: var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--success-soft, #ECFDF5);
+  font-size: 12px;
+  color: var(--slate);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+.clarify-answered-icon {
+  color: var(--success, #10B981);
+  font-weight: 700;
+}
+.clarify-answered-q {
+  color: var(--slate, #64748B);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clarify-answered-arrow { color: var(--slate-light, #9CA3AF); }
+.clarify-answered-a {
+  color: var(--ink-soft, #334155);
+  font-weight: 500;
 }
 
 /* 消息行 */

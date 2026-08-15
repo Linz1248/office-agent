@@ -50,12 +50,16 @@ from core.images.feature_extractor import (
     TextQuery,
 )
 from core.images.faiss_index import build_index, load_index
+from core.images.build import build_image_index
 from core.audios.features import (
     load_audio_model,
     transcribe_audio_segments,
     save_transcription_to_json,
     extract_text_features,
 )
+from core.audios.build import build_audio_index
+from core.audios.monitor import init_audio_monitor, schedule_audio_rebuild
+from core.build_progress import BuildProgress
 from core.face.face import load_face_model
 
 
@@ -79,6 +83,17 @@ async def lifespan(app: FastAPI):
     # 加载语音模型
     model_whisper, model_sbert, cc_model = load_audio_model(DEVICE)
     print("语音模型加载完成")
+
+    # 注入 SBERT 给音频防抖重建调度器（upload/delete 后自动重建音频索引）
+    init_audio_monitor(model_sbert)
+
+    # 启动时同步音频索引：对各现有音频文件夹触发防抖重建，修复存量不同步
+    try:
+        for fld in os.listdir(str(REPO_AUDIOS_ROOT)):
+            if os.path.isdir(os.path.join(str(REPO_AUDIOS_ROOT), fld)):
+                schedule_audio_rebuild(fld, model_sbert)
+    except Exception as e:
+        print(f"[startup] 音频索引同步失败: {e}")
 
     # 加载人脸模型
     face_model = load_face_model(DEVICE)
@@ -233,54 +248,21 @@ async def build_images_index(
     folder_names: List[str] = Query(..., description="要构建索引的文件夹名列表，均位于 repositories 目录下"),
     index_name: str = Query(..., description="索引文件名，不带后缀"),
 ):
-    # 参数检查
-    for fn in folder_names:
-        if ".." in fn or "/" in fn or "\\" in fn:
-            raise HTTPException(status_code=400, detail=f"文件夹名不合法: {fn}")
-    if ".." in index_name or "/" in index_name or "\\" in index_name:
-        raise HTTPException(status_code=400, detail="索引文件名不合法")
-
-    # 收集所有图片路径
-    image_paths = []
-    for folder_name in folder_names:
-        folder_path = os.path.join(str(REPO_IMAGES_ROOT), folder_name)
-        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
-            raise HTTPException(status_code=404, detail=f"文件夹不存在: {folder_name}")
-        for root, _, files in os.walk(folder_path):
-            for f in files:
-                if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
-                    image_paths.append(os.path.join(root, f))
-
-    if len(image_paths) == 0:
-        raise HTTPException(status_code=400, detail="指定文件夹中无图片可构建索引")
-
-    # 提取特征
-    features = extract_features(clip_model, preprocess, image_paths, DEVICE)
-
-    # 索引路径
-    index_filename = f"{index_name}.index" if not index_name.endswith(".index") else index_name
-    index_path = os.path.join(str(INDICE_IMAGES_ROOT), index_filename)
-
-    # 构建索引并保存
-    build_index(features, index_path)
-
-    # 同步构建 meta 信息
-    meta = {
-        "index_name": index_filename,
-        "folder_names": folder_names,
-        "image_count": len(image_paths),
-        "image_paths": image_paths,
-    }
-    meta_path = os.path.join(str(INDICE_META_ROOT), f"{index_name}.json")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    try:
+        result = build_image_index(
+            folder_names, index_name, clip_model, preprocess, DEVICE
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return JSONResponse(
         {
             "message": "索引构建成功",
-            "index_path": index_path,
-            "meta_path": meta_path,
-            "image_count": len(image_paths),
+            "index_path": result["index_path"],
+            "meta_path": result["meta_path"],
+            "image_count": result["image_count"],
         }
     )
 
@@ -299,6 +281,38 @@ async def get_all_dirs_tree(
     index_tree = build_tree(str(INDICE_IMAGES_ROOT), only_dirs=not include_files)
 
     return JSONResponse({"repositories": repo_tree, "indices": index_tree})
+
+
+@app.get("/build_progress/")
+async def get_build_progress(kind: str = Query("image", description="image 或 audio")):
+    """返回当前索引构建进度（供前端轮询显示进度条）。"""
+    if kind not in {"image", "audio"}:
+        raise HTTPException(status_code=400, detail="kind 只可为 image 或 audio")
+    return JSONResponse(BuildProgress.get(kind))
+
+
+@app.post("/create_folder/")
+async def create_folder(
+    kind: str = Query(..., description="image 或 audio"),
+    folder_name: str = Query(..., description="文件夹名"),
+):
+    """创建空文件夹（镜像缩略图/文本目录）。图像空文件夹会触发 watchdog 重建 global。"""
+    if kind not in {"image", "audio"}:
+        raise HTTPException(status_code=400, detail="kind 只可为 image 或 audio")
+    if ".." in folder_name or "/" in folder_name or "\\" in folder_name:
+        raise HTTPException(status_code=400, detail="文件夹名不合法")
+    if not folder_name.strip():
+        raise HTTPException(status_code=400, detail="文件夹名不能为空")
+
+    if kind == "image":
+        target = os.path.join(str(REPO_IMAGES_ROOT), folder_name)
+        mirror = os.path.join(str(REPO_THUMBNAIL_ROOT), folder_name)
+    else:
+        target = os.path.join(str(REPO_AUDIOS_ROOT), folder_name)
+        mirror = os.path.join(str(REPO_TEXTS_ROOT), folder_name)
+    os.makedirs(target, exist_ok=True)
+    os.makedirs(mirror, exist_ok=True)
+    return JSONResponse({"message": f"已创建文件夹 {folder_name}", "path": target})
 
 
 @app.post("/delete_images/")
@@ -633,6 +647,9 @@ async def upload_audios(folder_name: str = Form(...), files: List[UploadFile] = 
     if not saved_files:
         raise HTTPException(status_code=400, detail="未上传任何有效音频文件")
 
+    # 转写已落盘，防抖后台重建该文件夹同名音频索引（如 base）
+    schedule_audio_rebuild(folder_name, model_sbert)
+
     return JSONResponse(
         {
             "message": f"成功上传{len(saved_files)}个文件到文件夹 {folder_name}",
@@ -752,6 +769,12 @@ async def delete_audios(
     if not deleted_items:
         raise HTTPException(status_code=404, detail="未找到任何可删除的项目")
 
+    # 删除了音频文件/文件夹 → 防抖后台重建受影响文件夹的同名音频索引
+    if target in {"repo", "all"}:
+        affected_folders = {item.split("/")[0] for item in name_list}
+        for folder in affected_folders:
+            schedule_audio_rebuild(folder, model_sbert)
+
     return JSONResponse({"message": f"成功删除: {deleted_items}"})
 
 
@@ -776,55 +799,19 @@ async def build_audios_index(
     folder_names: List[str] = Query(..., description="多个音频文件所在的文件夹（位于 repositories/audios 下）"),
     index_name: str = Query(..., description="索引文件名，不带后缀"),
 ):
-    # 参数检查
-    for fn in folder_names:
-        if ".." in fn or "/" in fn or "\\" in fn:
-            raise HTTPException(status_code=400, detail=f"文件夹名不合法: {fn}")
-    if ".." in index_name or "/" in index_name or "\\" in index_name:
-        raise HTTPException(status_code=400, detail="索引文件名不合法")
-
-    # 遍历 repositories/texts/下的多个文件夹，查找所有 JSON 文件
-    all_texts = []
-    all_segments = []
-
-    for folder_name in folder_names:
-        folder_path = os.path.join(str(REPO_TEXTS_ROOT), folder_name)
-        if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
-            raise HTTPException(status_code=404, detail=f"文件夹不存在: {folder_name}")
-
-        for root, _, files in os.walk(folder_path):
-            for f in files:
-                if f.lower().endswith(".json"):
-                    meta_path = os.path.join(root, f)
-                    with open(meta_path, "r", encoding="utf-8") as file:
-                        data = json.load(file)
-                        segments = data.get("segments", [])
-                        for seg in segments:
-                            all_texts.append(seg["text"])
-                            all_segments.append(seg)
-
-    if len(all_texts) == 0:
-        raise HTTPException(status_code=400, detail="未找到有效的转写文本")
-
-    # 提取文本特征
-    features = extract_text_features(all_texts, model_sbert)
-
-    # 构建索引路径
-    index_path = os.path.join(str(INDICE_AUDIOS_ROOT), f"{index_name}.index")
-    meta_path = os.path.join(str(INDICE_TEXTS_ROOT), f"{index_name}.json")
-
-    # 构建并保存索引
-    build_index(features, index_path)
-
-    # 保存元数据（包含 audio_path / start / end / text）
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(all_segments, f, ensure_ascii=False, indent=2)
+    # 参数检查 + 构建（逻辑在 core/audios/build.py，端点与防抖调度器共用）
+    try:
+        result = build_audio_index(folder_names, index_name, model_sbert)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return JSONResponse(
         {
             "message": "音频转写索引构建成功",
-            "index_path": index_path,
-            "segment_count": len(all_segments),
+            "index_path": result["index_path"],
+            "segment_count": result["segment_count"],
         }
     )
 
@@ -909,6 +896,9 @@ async def search_text_to_audio(
 
         item = {
             "audio_path": seg["audio_path"],
+            "rel_path": os.path.relpath(
+                seg["audio_path"], str(REPO_AUDIOS_ROOT)
+            ).replace("\\", "/"),
             "start": seg["start"],
             "end": seg["end"],
             "text": seg["text"],

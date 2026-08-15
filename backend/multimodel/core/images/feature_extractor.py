@@ -17,14 +17,20 @@ def load_clip_model(device, models_dir):
     return model, preprocess  # 通常使用验证集预处理
 
 
-def extract_features(model, preprocess, paths, device):
+def extract_features(model, preprocess, paths, device, progress_cb=None):
     all_features = []
-    for path in tqdm(paths, desc="提取图像特征"):
+    total = len(paths)
+    for i, path in enumerate(tqdm(paths, desc="提取图像特征")):
         image = preprocess(Image.open(path).convert("RGB")).unsqueeze(0).to(device)
         with torch.no_grad():
             features = model.encode_image(image)
             features = features / features.norm(dim=-1, keepdim=True)
         all_features.append(features.cpu().numpy())
+        if progress_cb is not None:
+            try:
+                progress_cb(i + 1, total)
+            except Exception:
+                pass
     return np.vstack(all_features).astype("float32")
 
 

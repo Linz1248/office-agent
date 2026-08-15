@@ -27,6 +27,7 @@ from config import (
     DOC_COMPARE_URL,
     DOC_EXTRACT_URL,
     MULTIMODEL_URL,
+    PUBLIC_MULTIMODEL_BASE,
     HTTP_TIMEOUT,
     PORT,
     SERVICE_ACCOUNT_PASSWORD,
@@ -113,13 +114,30 @@ def _truncate(text: str, max_len: int = 2000) -> str:
 
 
 def _handle_error(e: Exception, service: str) -> str:
-    """将 HTTP 异常转换为用户友好的错误提示。"""
+    """将 HTTP 异常转换为用户友好的错误提示。
+
+    透传下游 HTTPException 的 detail（如「文件不存在或已过期，请重新上传」），
+    使 agent 能据此引导用户重新上传，而非仅看到无信息的状态码。
+    """
     if isinstance(e, httpx.ConnectError):
         return f"{service}服务不可达，请确认该服务已启动"
     if isinstance(e, httpx.TimeoutException):
         return f"{service}服务响应超时，请稍后重试"
     if isinstance(e, httpx.HTTPStatusError):
-        return f"{service}服务返回错误 ({e.response.status_code})"
+        detail = None
+        try:
+            body = e.response.json()
+            if isinstance(body, dict):
+                detail = body.get("detail") or body.get("message")
+        except Exception:
+            pass
+        if not detail:
+            try:
+                detail = (e.response.text or "").strip()[:200] or None
+            except Exception:
+                detail = None
+        base = f"{service}服务返回错误 ({e.response.status_code})"
+        return f"{base}：{detail}" if detail else base
     return f"{service}服务请求失败: {e}"
 
 
@@ -169,7 +187,7 @@ async def read_image(file_path: str) -> str:
 
     path = Path(file_path)
     if not path.exists():
-        return f"图片文件不存在: {file_path}"
+        return f"图片文件不存在或已过期（可能已被定时清理），请重新上传该图片后再试。"
 
     media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
     content = path.read_bytes()
@@ -341,7 +359,7 @@ async def list_image_libraries() -> str:
     client = _get_client()
     try:
         resp = await client.get(
-            f"{MULTIMODEL_URL}/get_images_dir/", params={"include_files": "false"}
+            f"{MULTIMODEL_URL}/get_images_dir/", params={"include_files": "true"}
         )
         resp.raise_for_status()
         result = resp.json()
@@ -377,13 +395,19 @@ async def search_images_by_text(
         top_k: 返回结果数量（默认 5）。
 
     Returns:
-        str: 搜索结果，包含匹配图片路径和相似度分数。
+        str: JSON 字符串 {"summary", "items"}，items 含 thumb_url/url/score，
+             前端会自动渲染为图片画廊，无需复述文件路径。
     """
     client = _get_client()
     try:
         resp = await client.post(
             f"{MULTIMODEL_URL}/text_search_images/",
-            params={"index_name": index_name, "value": top_k},
+            params={
+                "index_name": index_name,
+                "value": top_k,
+                "return_thumbnail": False,
+                "return_original": False,
+            },
             json={"text": query},
         )
         resp.raise_for_status()
@@ -395,12 +419,20 @@ async def search_images_by_text(
     if not results:
         return f"未找到与 '{query}' 匹配的图片。"
 
-    lines = [f"找到 {len(results)} 张匹配图片："]
-    for i, item in enumerate(results, 1):
-        score = item.get("score", 0)
-        path = item.get("path", "")
-        lines.append(f"  {i}. {path} (相似度: {score:.4f})")
-    return "\n".join(lines)
+    items = [
+        {
+            "kind": "image",
+            "path": item.get("path", ""),
+            "thumb_url": f"{PUBLIC_MULTIMODEL_BASE}/thumbnails/{item.get('path', '')}",
+            "url": f"{PUBLIC_MULTIMODEL_BASE}/images/{item.get('path', '')}",
+            "score": round(float(item.get("score", 0)), 4),
+        }
+        for item in results
+    ]
+    return json.dumps(
+        {"summary": f"找到 {len(items)} 张匹配图片。", "items": items},
+        ensure_ascii=False,
+    )
 
 
 @mcp.tool()
@@ -419,14 +451,15 @@ async def search_images_by_image(
         top_k: 返回结果数量（默认 5）。
 
     Returns:
-        str: 搜索结果，包含匹配图片路径和相似度分数。
+        str: JSON 字符串 {"summary", "items"}，items 含 thumb_url/url/score，
+             前端会自动渲染为图片画廊，无需复述文件路径。
     """
     from pathlib import Path
     import mimetypes
 
     path = Path(file_path)
     if not path.exists():
-        return f"图片文件不存在: {file_path}"
+        return f"图片文件不存在或已过期（可能已被定时清理），请重新上传该图片后再试。"
 
     client = _get_client()
     media_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
@@ -434,7 +467,12 @@ async def search_images_by_image(
     try:
         resp = await client.post(
             f"{MULTIMODEL_URL}/images_search_images/",
-            params={"index_name": index_name, "value": top_k},
+            params={
+                "index_name": index_name,
+                "value": top_k,
+                "return_thumbnail": False,
+                "return_original": False,
+            },
             files={"images": (path.name, content, media_type)},
         )
         resp.raise_for_status()
@@ -446,12 +484,20 @@ async def search_images_by_image(
     if not matched:
         return f"未找到与图片 '{path.name}' 匹配的相似图片。"
 
-    lines = [f"找到 {len(matched)} 张匹配图片："]
-    for i, item in enumerate(matched, 1):
-        score = item.get("score", 0)
-        img_path = item.get("path", "")
-        lines.append(f"  {i}. {img_path} (相似度: {score:.4f})")
-    return "\n".join(lines)
+    items = [
+        {
+            "kind": "image",
+            "path": item.get("path", ""),
+            "thumb_url": f"{PUBLIC_MULTIMODEL_BASE}/thumbnails/{item.get('path', '')}",
+            "url": f"{PUBLIC_MULTIMODEL_BASE}/images/{item.get('path', '')}",
+            "score": round(float(item.get("score", 0)), 4),
+        }
+        for item in matched
+    ]
+    return json.dumps(
+        {"summary": f"找到 {len(items)} 张相似图片。", "items": items},
+        ensure_ascii=False,
+    )
 
 
 # ── 音频检索工具 ──────────────────────────────────────────────
@@ -467,7 +513,7 @@ async def list_audio_libraries() -> str:
     client = _get_client()
     try:
         resp = await client.get(
-            f"{MULTIMODEL_URL}/get_audios_dir/", params={"include_files": "false"}
+            f"{MULTIMODEL_URL}/get_audios_dir/", params={"include_files": "true"}
         )
         resp.raise_for_status()
         result = resp.json()
@@ -490,7 +536,7 @@ async def list_audio_libraries() -> str:
 @mcp.tool()
 async def search_audios_by_text(
     query: str,
-    index_name: str = "global",
+    index_name: str = "base",
     top_k: int = 5,
 ) -> str:
     """通过文字描述搜索相似的音频片段。
@@ -499,17 +545,24 @@ async def search_audios_by_text(
 
     Args:
         query: 搜索文本描述，如 "习近平重要讲话" 或 "诗歌朗诵"。
-        index_name: 索引名称（不带 .index 后缀），可通过 list_audio_libraries 查看。默认 "global"。
+        index_name: 音频索引名（不带 .index 后缀）。音频库默认索引为 "base"
+                    （images 才用 "global"），可用 list_audio_libraries 查看。默认 "base"。
         top_k: 返回结果数量（默认 5）。
 
     Returns:
-        str: 搜索结果，包含匹配音频路径、时间片段、文本内容和相似度分数。
+        str: JSON 字符串 {"summary", "items"}，items 含 url/start/end/text/score，
+             前端会自动渲染为音频播放器（含片段定位），无需复述文件路径。
     """
     client = _get_client()
     try:
         resp = await client.post(
             f"{MULTIMODEL_URL}/text_search_audios/",
-            params={"index_name": index_name, "value": top_k},
+            params={
+                "index_name": index_name,
+                "value": top_k,
+                "return_audio": False,
+                "return_clip": False,
+            },
             json={"text": query},
         )
         resp.raise_for_status()
@@ -521,18 +574,21 @@ async def search_audios_by_text(
     if not matches:
         return f"未找到与 '{query}' 匹配的音频。"
 
-    lines = [f"找到 {len(matches)} 段匹配音频："]
-    for i, item in enumerate(matches, 1):
-        score = item.get("score", 0)
-        audio_path = item.get("audio_path", "")
-        start = item.get("start", 0)
-        end = item.get("end", 0)
-        text = item.get("text", "")
-        lines.append(
-            f"  {i}. [{start:.1f}s-{end:.1f}s] {text[:80]}...\n"
-            f"     来源: {audio_path} (相似度: {score:.4f})"
-        )
-    return "\n".join(lines)
+    items = []
+    for item in matches:
+        rel = item.get("rel_path") or ""
+        items.append({
+            "kind": "audio",
+            "url": f"{PUBLIC_MULTIMODEL_BASE}/audios/{rel}",
+            "start": round(float(item.get("start", 0)), 2),
+            "end": round(float(item.get("end", 0)), 2),
+            "text": item.get("text", ""),
+            "score": round(float(item.get("score", 0)), 4),
+        })
+    return json.dumps(
+        {"summary": f"找到 {len(items)} 段匹配音频。", "items": items},
+        ensure_ascii=False,
+    )
 
 
 # ── 启动 ──────────────────────────────────────────────────────

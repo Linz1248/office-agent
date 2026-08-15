@@ -22,6 +22,7 @@ import Levenshtein as Lev
 import uvicorn
 
 import config
+import cleanup  # 定时清理（uploads/compare_results/tmp_imgs）
 from config import TMP_DIR, UPLOAD_DIR, OUTPUT_DIR, PORT
 from utils import draw_boxes_on_pdf_word, rapidocr_util
 
@@ -50,10 +51,13 @@ class CompareRequest(BaseModel):
 ocr = None
 sealRecognition = None
 
+# 定时清理后台任务句柄（lifespan 中创建/取消）
+_cleanup_task = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global ocr, sealRecognition
+    global ocr, sealRecognition, _cleanup_task
 
     TMP_DIR.mkdir(exist_ok=True)
     UPLOAD_DIR.mkdir(exist_ok=True)
@@ -79,7 +83,12 @@ async def lifespan(app: FastAPI):
 
     app.mount("/static", StaticFiles(directory=str(OUTPUT_DIR)), name="static")
 
+    # 启动定时清理任务（uploads/compare_results/tmp_imgs）
+    _cleanup_task = await cleanup.start()
     yield
+    # 关闭定时清理任务
+    await cleanup.stop(_cleanup_task)
+    _cleanup_task = None
 
 
 app = FastAPI(title="合同比对接口", lifespan=lifespan)
@@ -180,7 +189,7 @@ async def download_file(filename: str, request: Request):
     file_path = f"{OUTPUT_DIR}/{filename}"
 
     if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise HTTPException(status_code=404, detail="文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     base_url = str(request.base_url).rstrip("/")
     return {"url": f"{base_url}/static/{filename}"}
@@ -191,7 +200,7 @@ async def get_file(filename: str):
     file_path = os.path.join(str(OUTPUT_DIR), filename)
 
     if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise HTTPException(status_code=404, detail="文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     return FileResponse(
         path=file_path,

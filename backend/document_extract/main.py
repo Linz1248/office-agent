@@ -47,6 +47,7 @@ from paddleocr import PPStructureV3
 import paddle
 
 import config
+import cleanup  # 定时清理（上传/输出/缓存/日志）
 from config import (
     UPLOAD_DIR,
     DATA_DIR,
@@ -198,6 +199,9 @@ else:
 BCRYPT_ROUNDS = 12
 security = HTTPBearer()
 
+# 定时清理后台任务句柄（lifespan 中创建/取消）
+_cleanup_task = None
+
 # OCR 引擎：从本地 pretrained_models 加载各子模块
 paddle.set_device(DEVICE)
 _pp_model_kwargs = {
@@ -336,13 +340,19 @@ def set_llm_cache(file_hash: str, fields_hash: str, result: dict):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _cleanup_task
     # 启动阶段：初始化上传目录、数据目录与缓存数据库
     UPLOAD_DIR.mkdir(exist_ok=True)
     DATA_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
     init_cache_db()
     init_db()
+    # 启动定时清理任务（上传/输出/缓存/日志）
+    _cleanup_task = await cleanup.start()
     yield
+    # 关闭定时清理任务
+    await cleanup.stop(_cleanup_task)
+    _cleanup_task = None
 
 
 app = FastAPI(title="文档抽取接口Demo", lifespan=lifespan)
@@ -625,7 +635,7 @@ async def doc_upload(file: UploadFile = File(...), current_user: str = Depends(v
 async def doc_delete(filename: str, current_user: str = Depends(verify_token)):
     file_path = _resolve_upload(filename)
     if not os.path.isfile(file_path):
-        raise HTTPException(status_code=400, detail="文件不存在")
+        raise HTTPException(status_code=400, detail="文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     os.remove(file_path)
 
@@ -1314,7 +1324,7 @@ def extract_concepts(file_path: str, fields: list, enhance: bool,
 def do_extract(request: DocEtractRequest, upload_dir: Path) -> dict:
     file_path = _resolve_upload(request.filename, upload_dir)
     if not file_path.exists():
-        raise FileNotFoundError("文件不存在")
+        raise FileNotFoundError("文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     # 计算缓存键
     hash_start = time.perf_counter()
@@ -1388,7 +1398,7 @@ async def doc_text(request: DocTextRequest,
     """
     file_path = _resolve_upload(request.filename)
     if not file_path.exists():
-        raise HTTPException(status_code=400, detail="文件不存在")
+        raise HTTPException(status_code=400, detail="文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     suffix = file_path.suffix.lower()
     try:
@@ -1540,7 +1550,7 @@ async def download_excel(filename: str, name: str | None = None):
     """
     path = _resolve_upload(filename, OUTPUT_DIR)  # 复用路径穿越防御，base=OUTPUT_DIR
     if not path.exists():
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise HTTPException(status_code=404, detail="文件不存在或已过期（可能已被定时清理），请重新上传后再试")
     disp = name or filename
     return FileResponse(
         path=path,
@@ -1601,7 +1611,7 @@ async def fill_template(req: FillTemplateRequest,
             detail="旧版 .xls 模板暂不支持，请另存为 .xlsx 后上传",
         )
     if not template_path.exists():
-        raise HTTPException(status_code=400, detail="模板文件不存在")
+        raise HTTPException(status_code=400, detail="模板文件不存在或已过期（可能已被定时清理），请重新上传后再试")
 
     try:
         cells, wb = _scan_template_fields(template_path)

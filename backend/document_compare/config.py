@@ -15,3 +15,9 @@ OUTPUT_DIR = SERVICE_ROOT / "compare_results"  # 比对结果 PDF（通过 /stat
 
 # 服务端口
 PORT = int(os.environ.get("DOC_COMPARE_PORT", "9900"))
+
+# 定时清理保留期（单位：天），均可经环境变量覆盖；置 0 关闭对应清理
+# 清理 uploads/（待比对 PDF）与 compare_results/（结果 PDF）；tmp_imgs/ 在比对流程内
+# 已即时清理，定时清扫仅兜底（进行中的临时图 mtime 为当前，不会被误删）
+CLEANUP_FILE_DAYS = float(os.environ.get("CLEANUP_FILE_DAYS", "7"))
+CLEANUP_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_INTERVAL_SECONDS", "3600"))

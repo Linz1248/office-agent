@@ -52,10 +52,10 @@
           <span class="nav-group-label">图像检索</span>
         </div>
         <router-link to="/build_image_library" class="nav-item" :class="{ active: $route.path === '/build_image_library' }">
-          <el-tooltip :content="isCollapsed ? '构建图像索引' : ''" placement="right" :disabled="!isCollapsed">
+          <el-tooltip :content="isCollapsed ? '图像库管理' : ''" placement="right" :disabled="!isCollapsed">
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
-              <span v-show="!isCollapsed" class="nav-label">构建索引库</span>
+              <span v-show="!isCollapsed" class="nav-label">图像库管理</span>
             </div>
           </el-tooltip>
         </router-link>
@@ -80,10 +80,10 @@
           <span class="nav-group-label">音频检索</span>
         </div>
         <router-link to="/build_audio_library" class="nav-item" :class="{ active: $route.path === '/build_audio_library' }">
-          <el-tooltip :content="isCollapsed ? '构建音频索引' : ''" placement="right" :disabled="!isCollapsed">
+          <el-tooltip :content="isCollapsed ? '音频库管理' : ''" placement="right" :disabled="!isCollapsed">
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
-              <span v-show="!isCollapsed" class="nav-label">构建索引库</span>
+              <span v-show="!isCollapsed" class="nav-label">音频库管理</span>
             </div>
           </el-tooltip>
         </router-link>

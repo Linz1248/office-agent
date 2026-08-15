@@ -1,210 +1,193 @@
 <template>
-    <div class="page-container">
-        <h1 class="page-title">图搜图</h1>
-        <div class="search-content">
-            <div class="search-controls card">
-                <el-form :inline="true">
-                    <el-form-item label="索引库">
-                        <el-select v-model="indexName" placeholder="选择" style="width: 150px">
-                            <el-option
-                            v-for="item in indexLibary"
-                            :key="item.value"
-                            :label="item.label"
-                            :value="item.label"
-                            />
-                        </el-select>
-                    </el-form-item>
-                    <el-form-item label="Top-K">
-                        <el-input-number v-model="top_k" :step="1" :min="0.0"></el-input-number>
-                    </el-form-item>
-                    <el-form-item>
-                        <el-checkbox v-model="returnOriginal">返回原图</el-checkbox>
-                        <el-checkbox v-model="returnThumbnail">返回缩略图</el-checkbox>
-                    </el-form-item>
-                </el-form>
+  <div class="page-container">
+    <div class="retrieval-page">
+      <header class="retrieval-header">
+        <h1 class="page-title"><span class="title-accent" />图搜图</h1>
+        <p class="page-desc">上传一张图片，从图像库中检索视觉最相似的图片，点击缩略图可放大查看。</p>
+      </header>
 
-                <div class="search-bar">
-                    <input ref="fileInput" type="file" multiple @change="onFilesChange" accept="image/*" class="file-input" />
-                    <el-button type="primary" @click="submitSearch">开始检索</el-button>
-                    <el-button type="info" plain @click="reset">重置</el-button>
-                </div>
-            </div>
-
-            <el-divider />
-
-            <div v-if="count !== null" class="results-section">
-                <p class="results-count">共找到 {{ count }} 张匹配图片</p>
-                <el-row :gutter="16">
-                    <el-col v-for="(it, idx) in matched" :key="idx" :span="6" style="margin-bottom:16px">
-                        <el-card class="result-card">
-                            <div class="result-image">
-                                <img v-if="it.thumbnail_base64" :src="toDataUrl(it.thumbnail_base64)" />
-                                <img v-else-if="it.original_base64" :src="toDataUrl(it.original_base64)" />
-                                <div v-else class="no-image">无图</div>
-                            </div>
-                            <div class="result-info">
-                                <div><strong>路径:</strong> {{ it.path }}</div>
-                                <div><strong>置信度:</strong> {{ it.score.toFixed(4) }}</div>
-                                <div v-if="it.error" style="color:var(--danger)">{{ it.error }}</div>
-                            </div>
-                        </el-card>
-                    </el-col>
-                </el-row>
-            </div>
+      <section class="retrieval-controls card">
+        <div class="control-row">
+          <div class="control-field">
+            <span class="control-label">索引库</span>
+            <el-select v-model="indexName" placeholder="选择索引" :disabled="loading">
+              <el-option
+                v-for="item in indexLibrary"
+                :key="item.value"
+                :label="item.label"
+                :value="item.label"
+              />
+            </el-select>
+          </div>
+          <div class="control-field">
+            <span class="control-label">返回数量</span>
+            <el-input-number v-model="topK" :step="1" :min="1" :max="50" :disabled="loading" />
+          </div>
         </div>
+        <div class="search-row">
+          <div class="upload-zone">
+            <label class="upload-trigger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              选择图片
+              <input
+                ref="fileInput"
+                type="file"
+                multiple
+                accept="image/*"
+                hidden
+                :disabled="loading"
+                @change="onFilesChange"
+              />
+            </label>
+            <div v-if="files.length" class="file-chips">
+              <span v-for="(f, i) in files" :key="i" class="file-chip">
+                <span class="chip-name" :title="f.name">{{ f.name }}</span>
+                <span class="chip-remove" @click="removeFile(i)">×</span>
+              </span>
+            </div>
+            <span v-else class="upload-hint">支持多选，仅图片</span>
+          </div>
+          <div class="retrieval-actions">
+            <el-button type="primary" :loading="loading" @click="submitSearch">开始检索</el-button>
+            <el-button :disabled="loading" @click="reset">重置</el-button>
+          </div>
+        </div>
+      </section>
+
+      <section class="retrieval-results">
+        <!-- 初始 -->
+        <div v-if="!loading && count === null && !error" class="retrieval-state card">
+          <div class="state-icon">🖼</div>
+          <div class="state-title">上传图片开始检索</div>
+          <div class="state-hint">选择一张图片，将返回视觉最相似的 {{ topK }} 张结果。</div>
+        </div>
+        <!-- 加载 -->
+        <div v-else-if="loading" class="retrieval-state retrieval-loading card">
+          <div class="spinner" />
+          <div class="state-title">检索中…</div>
+          <div class="state-hint">正在比对图像特征，请稍候。</div>
+        </div>
+        <!-- 错误 -->
+        <div v-else-if="error" class="retrieval-state is-error card">
+          <div class="state-icon">⚠</div>
+          <div class="state-title">检索失败</div>
+          <div class="state-hint">{{ error }}</div>
+        </div>
+        <!-- 空 -->
+        <div v-else-if="count === 0" class="retrieval-state card">
+          <div class="state-icon">🖼</div>
+          <div class="state-title">未找到相似图片</div>
+          <div class="state-hint">换一张图片或选择其他索引库试试。</div>
+        </div>
+        <!-- 结果 -->
+        <template v-else>
+          <RetrievalGallery :items="galleryItems" />
+        </template>
+      </section>
     </div>
+  </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import request from "@/utils/request";
+import { ref, computed } from 'vue'
+import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
+import config from '/config'
+import RetrievalGallery from '@/components/RetrievalGallery.vue'
 
+const BASE = config.multimodel
 
-const indexLibary = ref([])
+const indexLibrary = ref([])
+const indexName = ref('global')
+const topK = ref(5)
+const files = ref([])
+const fileInput = ref(null)
+const matched = ref([])
+const count = ref(null)
+const loading = ref(false)
+const error = ref('')
+
 const init = () => {
-  request.get('/', { serverName: 'docExtract' })
-    .then(res => {
-      if (res.status != 200)
-        return
+  request
+    .get('/get_images_dir/?include_files=true', { serverName: 'multimodel' })
+    .then((res) => {
+      if (res.status === 200) {
+        indexLibrary.value = (res.data.indices || []).map((i) => {
+          const name = (i.name || '').replace(/\.index$/, '')
+          return { label: name, value: name }
+        })
+      }
     })
-    request.get('/get_images_dir/?include_files=true', {serverName: 'multimodel'}).then(res => {
-        if (res.status === 200){
-            const indices = res.data.indices
-            for (let i = 0; i < indices.length; i++) {
-                const indice_name = indices[i].name
-                const indice_split = indice_name.split('.')[0]
-                indexLibary.value.push({label: indice_split, value: indice_split})
-            }
-        } else {
-            ElMessage.error('初始化失败')
-        }
-    })
+    .catch(() => {})
 }
 init()
 
-const files = ref([])
-const matched = ref([])
-const count = ref(null)
-const message = ref('')
-const fileInput = ref(null)
-const indexName = ref('global')
-const top_k = ref(5)
-const returnOriginal = ref(false)
-const returnThumbnail = ref(true)
-
 const onFilesChange = (e) => {
-    files.value = Array.from(e.target.files || [])
+  files.value = Array.from(e.target.files || [])
+}
+const removeFile = (i) => {
+  files.value.splice(i, 1)
+  if (fileInput.value) fileInput.value.value = ''
 }
 
-const toDataUrl = (base64Str) => {
-    return 'data:image/jpeg;base64,' + base64Str
-}
+const galleryItems = computed(() =>
+  matched.value.map((it) => ({
+    kind: 'image',
+    path: it.path,
+    thumb_url: `${BASE}/thumbnails/${it.path}`,
+    url: `${BASE}/images/${it.path}`,
+    score: Number(it.score ?? 0).toFixed(4),
+  })),
+)
 
 const submitSearch = () => {
-    if (!files.value.length) {
-        ElMessage.error('请先选择图片')
-        return
-    }
-
-    const form = new FormData()
-    files.value.forEach(f => form.append('images', f, f.name))
-    try {
-        request.post(
-            '/images_search_images/',
-            form,
-            {
-                params: {
-                index_name: indexName.value,
-                value: top_k.value,
-                return_original: returnOriginal.value,
-                return_thumbnail: returnThumbnail.value
-                },
-                serverName: 'multimodel',
-                timeout: 60000
-            }
-        ).then(res => {
-            if (res.status === 200){
-                matched.value = res.data.matched_images
-                count.value = res.data.count
-                message.value = res.data.message
-                ElMessage.success('检索成功')
-            } else {
-                ElMessage.error('检索失败')
-            }
-        })
-    } catch (err) {
-        console.error(err)
-        const detail = err?.response?.data?.detail || err.message || '请求失败'
-        ElMessage.error('请求失败: ' + detail)
-    }
+  if (!files.value.length) {
+    ElMessage.warning('请先选择图片')
+    return
+  }
+  const form = new FormData()
+  files.value.forEach((f) => form.append('images', f, f.name))
+  loading.value = true
+  error.value = ''
+  request
+    .post(
+      '/images_search_images/',
+      form,
+      {
+        params: {
+          index_name: indexName.value,
+          value: topK.value,
+          return_original: false,
+          return_thumbnail: false,
+        },
+        serverName: 'multimodel',
+        timeout: 60000,
+      },
+    )
+    .then((res) => {
+      matched.value = res.data.matched_images || []
+      count.value = res.data.count ?? matched.value.length
+    })
+    .catch((err) => {
+      error.value = err?.response?.data?.detail || err.message || '请求失败，请稍后重试'
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 const reset = () => {
-    indexName.value = "global"
-    top_k.value = 5
-    returnOriginal.value = false
-    returnThumbnail.value = true
-    matched.value = []
-    count.value = null
-    if (fileInput.value) fileInput.value.value = ''
+  indexName.value = 'global'
+  topK.value = 5
+  files.value = []
+  matched.value = []
+  count.value = null
+  error.value = ''
+  if (fileInput.value) fileInput.value.value = ''
 }
 </script>
-
-<style scoped>
-.search-content {
-  max-width: 1100px;
-}
-
-.search-controls {
-  padding: var(--space-md) var(--space-lg);
-  margin-bottom: var(--space-md);
-}
-
-.search-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-input {
-  flex: 1;
-  font-size: 14px;
-}
-
-.results-count {
-  font-size: 14px;
-  color: var(--slate);
-  margin: 0 0 var(--space-md) 0;
-}
-
-.result-card {
-  border-radius: var(--radius-md);
-}
-
-.result-image {
-  height: 140px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.result-image img {
-  max-width: 100%;
-  max-height: 130px;
-  border-radius: var(--radius-sm);
-}
-
-.no-image {
-  color: var(--slate-light);
-  font-size: 14px;
-}
-
-.result-info {
-  margin-top: 8px;
-  word-break: break-all;
-  font-size: 13px;
-  color: var(--slate);
-  line-height: 1.6;
-}
-</style>
