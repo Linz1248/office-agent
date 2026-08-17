@@ -95,3 +95,38 @@ UPLOAD_DIR = SERVICE_ROOT / "uploads"
 CLEANUP_FILE_DAYS = float(os.environ.get("CLEANUP_FILE_DAYS", "7"))
 CLEANUP_SESSION_DAYS = float(os.environ.get("CLEANUP_SESSION_DAYS", "30"))
 CLEANUP_INTERVAL_SECONDS = float(os.environ.get("CLEANUP_INTERVAL_SECONDS", "3600"))
+
+# ── 个人知识库（RAG）配置 ─────────────────────────────────────
+# 复用 document_extract 抽取全文（PDF/Word/Excel/图片 OCR），本地分块 + 嵌入 + 向量检索。
+# 通过自定义 search_knowledge 工具（注册到 Agent Toolkit）实现 agentic RAG，
+# Agent 自主决定何时检索用户个人知识库与全平台公开文档。
+#
+# 嵌入模型：默认本地 Ollama qwen3-embedding:8b（中英双语，4096 维），需先 `ollama pull qwen3-embedding:8b`。
+# 若 Ollama 或该模型不可用，知识库功能优雅降级（不注册 search_knowledge，KB 接口返回 503），
+# 其余对话/办公能力不受影响。
+KB_EMBEDDING_PROVIDER = os.environ.get("KB_EMBEDDING_PROVIDER", "ollama")
+KB_OLLAMA_HOST = os.environ.get("KB_OLLAMA_HOST", "http://localhost:11434")
+KB_EMBEDDING_MODEL = os.environ.get("KB_EMBEDDING_MODEL", "qwen3-embedding:8b")
+KB_EMBEDDING_DIM = int(os.environ.get("KB_EMBEDDING_DIM", "4096"))
+
+# 向量库：Qdrant 本地持久化（进程内 on-disk，无需额外服务）
+KB_QDRANT_PATH = SERVICE_ROOT / "kb_qdrant"
+KB_COLLECTION = os.environ.get("KB_COLLECTION", "office_kb")
+
+# 知识库元数据 SQLite（文档清单 / 共享状态 / 索引状态 / 全文缓存）
+KB_DB_PATH = SERVICE_ROOT / "kb.db"
+# 原始文件存放目录（用户上传文档原件，便于复检；删除文档时一并清除，不自动清理）
+KB_FILES_DIR = SERVICE_ROOT / "kb_files"
+
+# 分块与检索参数
+KB_CHUNK_SIZE = int(os.environ.get("KB_CHUNK_SIZE", "512"))
+KB_CHUNK_OVERLAP = int(os.environ.get("KB_CHUNK_OVERLAP", "64"))
+KB_SEARCH_TOP_K = int(os.environ.get("KB_SEARCH_TOP_K", "5"))
+KB_SCORE_THRESHOLD = float(os.environ.get("KB_SCORE_THRESHOLD", "0.3"))
+
+# ── Skill 系统（Markdown 指令集 + 内网共享市场）─────────────────────
+# 基于 AgentScope SDK 的 Skill 机制（SkillLoaderBase），用户创建 Markdown
+# 指令文件（SKILL.md），智能体在对话中通过 SDK 内置 Skill 查看器按需读取。
+# 可公开到内网市场，其他用户安装后获得独立副本（快照拷贝），不受原作者删除影响。
+SKILL_DIR = SERVICE_ROOT / "skills"
+SKILL_DB_PATH = SERVICE_ROOT / "skill.db"

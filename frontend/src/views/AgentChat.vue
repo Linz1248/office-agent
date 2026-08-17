@@ -45,16 +45,10 @@
         <!-- 欢迎消息 -->
         <div v-if="messages.length === 0" class="chat-welcome">
           <div class="welcome-icon">
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="64" height="64" rx="16" fill="#2563EB"/>
-              <path d="M20 17C20 15.34 21.34 14 22.5 14H36l8 8v25c0 1.66-1.34 3-3 3H22.5c-1.16 0-2.5-1.34-2.5-3V17Z" fill="white" fill-opacity="0.9"/>
-              <path d="M36 14v8h8" stroke="#2563EB" stroke-width="2.5" stroke-linejoin="round" fill="white"/>
-              <line x1="25" y1="30" x2="37" y2="30" stroke="#93C5FD" stroke-width="2.5" stroke-linecap="round"/>
-              <line x1="25" y1="36" x2="34" y2="36" stroke="#93C5FD" stroke-width="2.5" stroke-linecap="round"/>
-              <path d="M45 13l1.6 4.4L51 19l-4.4 1.6L45 25l-1.6-4.4L39 19l4.4-1.6L45 13Z" fill="#FDE047"/>
-            </svg>
+            <BrandLogo :size="64" />
           </div>
-          <h2>你好，我是专属的 AI 办公搭子</h2>
+          <h2>你好，我是慧办 AI 办公搭子</h2>
+          <p class="welcome-subtitle">智能办公助手 · 支持文档问答、知识检索与办公工具调用</p>
           <div class="welcome-suggestions">
             <button v-for="s in suggestions" :key="s" class="suggestion-chip" @click="useSuggestion(s)">
               {{ s }}
@@ -226,12 +220,62 @@
             style="display: none"
             @change="handleFileSelect"
           />
-          <button class="upload-btn" @click="triggerFileUpload" :disabled="isWaiting" title="上传 PDF/Word/Excel 文件">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-            </svg>
-          </button>
+          <el-popover
+            v-model:visible="plusMenuVisible"
+            placement="top-start"
+            :width="280"
+            trigger="click"
+            popper-class="kb-plus-popover"
+            :show-arrow="false"
+          >
+            <template #reference>
+              <button
+                class="plus-btn"
+                :class="{ active: plusMenuVisible }"
+                :disabled="isWaiting"
+                title="功能菜单 · 上传文件 / 知识库检索"
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span v-if="useKB" class="plus-btn-badge" title="知识库检索已开启"></span>
+              </button>
+            </template>
+            <div class="plus-menu">
+              <button class="plus-menu-item" type="button" @click="onMenuUpload">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span class="plus-menu-text">
+                  <span class="plus-menu-title">上传文件</span>
+                  <span class="plus-menu-desc">PDF / Word / Excel / 图片</span>
+                </span>
+              </button>
+              <button
+                class="plus-menu-item kb-menu-item"
+                :class="{ on: useKB }"
+                type="button"
+                @click="useKB = !useKB"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                </svg>
+                <span class="plus-menu-text">
+                  <span class="plus-menu-title">知识库检索</span>
+                  <span class="plus-menu-desc">{{ useKB ? '已开启 · 检索个人文档与共享内容' : '已关闭 · 仅用通用知识作答' }}</span>
+                </span>
+                <span class="kb-mini-switch" :class="{ on: useKB }"><span class="kb-mini-thumb"></span></span>
+              </button>
+            </div>
+          </el-popover>
           <el-input
             v-model="inputText"
             type="textarea"
@@ -261,19 +305,22 @@
             </svg>
           </button>
         </div>
-        <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击回形针上传 PDF、Word、Excel 或图片</p>
+        <div class="chat-input-meta">
+          <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击 + 展开上传文件 / 知识库检索</p>
+        </div>
       </footer>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, computed, onMounted } from 'vue'
+import { ref, reactive, nextTick, computed, onMounted, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import config from '/config'
 import RetrievalGallery from '@/components/RetrievalGallery.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -297,6 +344,13 @@ const isWaiting = ref(false)
 const messagesContainer = ref(null)
 const attachedFiles = ref([])
 const fileInput = ref(null)
+// 知识库检索开关：开启时本次对话启用 RAG（后端按 use_kb 激活 search_knowledge 工具）；
+// 持久化到 localStorage，默认开启。
+const useKB = ref(localStorage.getItem('kb_retrieval_enabled') !== 'false')
+const onKBToggle = (v) => localStorage.setItem('kb_retrieval_enabled', v ? 'true' : 'false')
+watch(useKB, onKBToggle)
+// 「+」功能菜单（上传文件 / 知识库检索）展开状态
+const plusMenuVisible = ref(false)
 
 const suggestions = [
   '列出可用的图像库索引',
@@ -400,6 +454,11 @@ const useSuggestion = (text) => {
 // ── 文件上传 ──
 const triggerFileUpload = () => {
   fileInput.value?.click()
+}
+// 「+」菜单：选择上传文件 → 关闭菜单并唤起文件选择
+const onMenuUpload = () => {
+  plusMenuVisible.value = false
+  triggerFileUpload()
 }
 
 const handleFileSelect = async (event) => {
@@ -556,6 +615,7 @@ const sendMessage = async () => {
       body: JSON.stringify({
         message: text,
         session_id: currentSessionId.value,
+        use_kb: useKB.value,
         attachments: readyAttachments.length
           ? readyAttachments.map(f => ({
               original_name: f.original_name,
@@ -884,6 +944,14 @@ const sendMessage = async () => {
   line-height: 1.6;
 }
 
+.welcome-subtitle {
+  font-size: 14px;
+  color: var(--slate);
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+/* 欢迎屏建议 */
 .welcome-suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -1214,8 +1282,9 @@ const sendMessage = async () => {
   height: 10px;
 }
 
-/* 上传按钮 */
-.upload-btn {
+/* 「+」功能按钮 */
+.plus-btn {
+  position: relative;
   flex-shrink: 0;
   width: 36px;
   height: 36px;
@@ -1230,19 +1299,36 @@ const sendMessage = async () => {
   transition: all var(--transition);
 }
 
-.upload-btn:hover:not(:disabled) {
+.plus-btn:hover:not(:disabled) {
   color: var(--accent);
   background: var(--accent-soft);
 }
 
-.upload-btn:disabled {
+.plus-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.plus-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.upload-btn svg {
-  width: 18px;
-  height: 18px;
+.plus-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* RAG 启用时的状态徽标（绿点） */
+.plus-btn-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  border: 2px solid var(--paper);
 }
 
 /* 消息内附件显示 */
@@ -1335,6 +1421,17 @@ const sendMessage = async () => {
   font-size: 12px;
   color: var(--slate-light);
   margin: 8px 0 0;
+}
+
+/* 底部提示行（上传 / 知识库检索已并入「+」菜单） */
+.chat-input-meta {
+  max-width: 760px;
+  margin: 8px auto 0;
+}
+
+.chat-input-meta .chat-input-hint {
+  margin: 0;
+  text-align: center;
 }
 
 /* 思考过程（可折叠） */
@@ -1558,5 +1655,102 @@ const sendMessage = async () => {
     height: 30px;
     font-size: 12px;
   }
+}
+</style>
+
+<!-- 非 scoped：el-popover 内容被 teleport 到 body，需全局样式 -->
+<style>
+.kb-plus-popover.el-popover {
+  padding: 8px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--mist);
+}
+
+.kb-plus-popover .plus-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kb-plus-popover .plus-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  transition: background var(--transition);
+}
+
+.kb-plus-popover .plus-menu-item:hover {
+  background: var(--mist-light);
+}
+
+.kb-plus-popover .plus-menu-item.kb-menu-item.on {
+  background: var(--accent-soft);
+}
+
+.kb-plus-popover .plus-menu-item svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.kb-plus-popover .plus-menu-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.kb-plus-popover .plus-menu-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.kb-plus-popover .plus-menu-desc {
+  font-size: 11px;
+  color: var(--slate);
+  margin-top: 2px;
+}
+
+/* 菜单内迷你开关 */
+.kb-plus-popover .kb-mini-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--slate-light);
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.kb-plus-popover .kb-mini-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(30, 41, 59, 0.25);
+  transition: transform var(--transition);
+}
+
+.kb-plus-popover .kb-mini-switch.on {
+  background: var(--accent);
+}
+
+.kb-plus-popover .kb-mini-switch.on .kb-mini-thumb {
+  transform: translateX(14px);
 }
 </style>

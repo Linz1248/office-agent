@@ -61,6 +61,21 @@ const router = createRouter({
           component: () => import('../views/TextSearchAudio.vue')
         },
         {
+          path: '/knowledge_base',
+          name: 'KnowledgeBase',
+          component: () => import('../views/KnowledgeBase.vue')
+        },
+        {
+          path: '/skill_market',
+          name: 'SkillMarket',
+          component: () => import('../views/SkillMarket.vue')
+        },
+        {
+          path: '/my_skills',
+          name: 'MySkills',
+          component: () => import('../views/MySkills.vue')
+        },
+        {
           path: '/agent',
           name: 'AgentChat',
           component: () => import('../views/AgentChat.vue')

@@ -88,6 +88,7 @@ from config import (
     INJECTION_TIMEZONE,
     JWT_ALGORITHM,
     JWT_SECRET_KEY,
+    KB_EMBEDDING_MODEL,
     LLM_PROVIDER,
     LLM_THINKING_ENABLE,
     MEMORY_DIR,
@@ -96,13 +97,17 @@ from config import (
     SERVICE_ACCOUNT_PASSWORD,
     SERVICE_ACCOUNT_USERNAME,
     SESSION_DB_PATH,
+    SERVICE_ROOT,
+    SKILL_DIR,
     TOOL_RESULT_LIMIT,
     UPLOAD_DIR,
     WORKSPACE_DIR,
 )
 from llm_config import get_model_and_formatter, get_memory_model
 import cleanup  # 定时清理（上传图片/过期会话/工作区，不含 memory）
+import skill as skill_module  # Skill 系统（Markdown 指令集 + 内网共享市场）
 from ask_user import AskUser  # human-in-loop 外部工具（检索前追问补全信息）
+import kb  # 个人知识库 RAG（嵌入/向量库/检索；未就绪时优雅降级）
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -131,9 +136,20 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - search_audios_by_text：通过文字描述在音频库中搜索匹配的音频片段（音频索引默认 index_name=base，注意音频不是 global）
 - list_image_libraries / list_audio_libraries：查看可用的图像/音频库索引（不确定索引名时先调用查看）
 
+个人知识库（RAG）：
+- 当用户开启「知识库检索」开关时，系统会在每次回复前自动检索用户个人知识库（本人上传的全部文档）与全平台已公开文档中与问题相关的片段，作为上下文提示注入。你应基于这些自动注入的检索结果作答，并在回答中注明出处文档名。
+- search_knowledge：如果你需要更精确地检索特定内容（如追问中需要重新检索、或自动注入的结果不够具体），可以主动调用此工具进行补充检索。该工具由用户在对话框的「知识库检索」开关控制：开关关闭时调用会被拒绝（返回「未启用」提示），此时不要重试，直接据通用知识作答，并提示用户可开启该开关后再问。开关开启时正常调用。
+- 对于不涉及用户文档的通用问题，即使开关开启，自动检索也可能无结果，此时直接据通用知识作答即可。
+
+Skill 系统（技能指令）：
+- 你拥有一个基于 Markdown 指令集的 Skill 系统，系统会在每次对话时将已启用的 skill 列表（名称+描述）注入到你的上下文中。
+- 当用户的请求匹配某个 skill 的描述时，调用 Skill 查看器工具读取该 skill 的完整指令，然后按指令使用已有工具执行操作。
+- Skill 不是工具——不能直接"调用"一个 skill，而是先读取其指令再按步骤执行。
+- 用户可通过「Skill 市场」页面创建、管理、共享自己的 skill，也可以安装他人公开的 skill。
+
 任务管理与文件操作：
 - TaskCreate / TaskUpdate / TaskList / TaskGet：创建和跟踪任务计划，适合复杂多步任务
-- Read / Write / Edit：读写文件，可用于记录笔记和管理长期记忆
+- Read / Write / Edit：读写文件，用于管理长期记忆（详见下方"长期记忆"部分）
 
 文件上传：
 用户可以在对话框中上传 PDF、Word(.docx/.doc)、Excel(.xlsx/.xls) 或图片。上传成功后，消息会附带文件信息：
@@ -144,6 +160,7 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 
 工具调用原则（重要）：
 - 只在用户明确请求需要工具支持的具体操作时才调用工具。例如用户说"提取合同日期"才调用 extract_document，用户说"比对这两份文件"才调用 compare_documents。
+- 例外：长期记忆的保存属于你的主动职责，不需要用户明确请求（详见下方"长期记忆"部分）。
 - 用户上传文档（PDF/Word/Excel）后，根据其意图选择处理方式，不要一刀切：
   · 一般性请求（解释一下、总结、问答、翻译、提取要点、看看这个文件讲什么等）→ 调用 read_document 获取全文，由你直接作答；
   · 明确要抽取文档特定字段（如"合同名称/签订日期/甲方"，PDF/图片均可）→ 调用 extract_document，调用前需确认用户要提取哪些字段；
@@ -156,6 +173,26 @@ SYSTEM_PROMPT = """你是"AI办公搭子"，一个专业的智能办公助手。
 - 工具调用失败时，向用户说明失败原因，不要盲目重试。
 - 若工具返回「文件不存在或已过期」「可能已被定时清理」等提示，说明用户先前上传的文件因长期未使用被定时清理。请向用户说明该文件已过期并请其重新上传，不要用原文件名（extract_filename/file_path/compare_filename）反复重试。
 - 多媒体检索（search_images_by_text / search_images_by_image / search_audios_by_text）的 human-in-loop：若用户已明确「搜索关键词」和「期望返回数量」，直接调用对应检索工具（数量作为 top_k）；若二者之一缺失（如只说"找几张起重机的图"但没说几张），先调用 ask_user 工具向用户追问（例如 question="请补充：搜索关键词，以及想要返回多少条结果", options=["3 条","5 条","10 条"]），拿到用户作答后再调用检索工具。检索结果（图片/音频）会以画廊形式自动展示给用户，你只需用一句话概述检索结果，不要复述文件路径。
+
+长期记忆（重要）：
+你拥有一个基于 Markdown 文件的长期记忆系统，跨会话持久保存。系统已在每次对话时将记忆索引（MEMORY.md）注入到你的上下文中，并在回复前异步检索相关记忆文件作为提示。
+- 何时保存：当你从对话中学到以下信息时，应**主动**用 Write 工具保存记忆（无需用户要求）：
+  · 用户偏好：如"我喜欢简洁的回复"、"用中文回答"、"不要加 emoji"等
+  · 用户角色：如用户的职业、技术背景、所在行业等
+  · 工作反馈：如用户纠正你的做法（"不要这样做"）或确认你的做法（"对，就这样"）
+  · 项目背景：如用户提到的项目目标、截止日期、关键约束等
+- 何时不保存：不要保存当前对话的临时状态、可通过工具直接获取的信息、或用户明确说"不要记"的内容。
+- 如何保存（两步）：
+  1. 用 Write 工具将记忆写入独立的 .md 文件（如 user_preference.md），文件开头使用 frontmatter 格式：
+     ---
+     name: 记忆名称
+     description: 一句话描述何时应检索此记忆
+     type: user/feedback/project/reference
+     ---
+     （正文为记忆内容；feedback/project 类型应包含 **Why:** 和 **How to apply:** 行）
+  2. 用 Edit 工具在 MEMORY.md 中添加一行索引：- [标题](文件名.md) — 一句话描述
+- 用户明确要求"记住"某事时，立即保存；要求"忘记"某事时，找到并删除对应记忆文件和索引行。
+- 记忆文件保存在系统提示中注入的记忆目录下，直接写入即可，无需创建目录。
 
 工作原则：
 - 始终使用中文回复，保持简洁专业。
@@ -467,8 +504,13 @@ async def lifespan(app: FastAPI):
 
     _MCPTool.__init__ = _sanitized_mcp_init
 
-    # 4. 创建 Toolkit（MCP 工具 + 计划工具 + 文件读写工具）
-    #    Read/Write/Edit 供智能体自主管理长期记忆 Markdown 文件
+    # 4. 创建 Toolkit（MCP 工具 + 计划工具 + 文件读写工具 + Skill 系统）
+    #    Read/Write/Edit 供智能体自主管理长期记忆 Markdown 文件。
+    #    search_knowledge 注册在 "basic" 组（始终可见），由权限系统按
+    #    /chat 的 use_kb 开关决定是否放行（关闭时 check_permissions 返回 DENY），
+    #    而非用工具组激活——避免智能体用 reset_tools 自激活绕过开关。
+    #    SharedSkillLoader 按 contextvar 解析当前用户，返回其启用的 skill
+    #    （自建 + 已安装），SDK 自动注册 Skill 查看器并注入系统提示。
     _toolkit = Toolkit(
         tools=[
             TaskCreate(),
@@ -481,6 +523,7 @@ async def lifespan(app: FastAPI):
             AskUser(),
         ],
         mcps=[mcp_client],
+        skills_or_loaders=[skill_module.SharedSkillLoader()],
     )
 
     # 5. 配置 ReAct 循环与上下文压缩
@@ -528,8 +571,34 @@ async def lifespan(app: FastAPI):
         timeout=httpx.Timeout(300.0, connect=10.0),
     )
 
-    # 11. 启动定时清理任务（上传图片/过期会话/工作区；不含 memory 长期记忆）
+    # 11. 初始化个人知识库 RAG：复用上面的 HTTP 客户端与 document_extract token
+    #     获取器；注入 _forward_to_extract 复用其带 token/退避的上传逻辑。
+    #     Ollama 嵌入模型或向量库不可用时优雅降级（is_ready()=False），
+    #     KB 接口返回 503，其余能力正常。
+    kb.set_upload_fn(_forward_to_extract)
+    await kb.init_kb(_http_client, _get_extract_token)
+    # 始终注册 search_knowledge 工具到 "kb" 组：未就绪时 call() 返回友好提示。
+    # 该组默认不激活，仅当 /chat 收到 use_kb=True 时激活，LLM 才可见该工具——
+    # 实现「关闭检索时不启用 RAG」。注册后用 get_tool 实际校验工具真在 Toolkit 中。
+    await _toolkit.add_tool(kb.SearchKnowledge())
+    # 直接检查 "basic" 组是否含 search_knowledge（不触发 MCP 工具枚举，避免在 MCP
+    # 服务未启动时报 TaskGroup 错误）。MCP 工具在 agent 实际执行 get_tool 时才枚举。
+    _has_kb_tool = any(
+        getattr(t, "name", "") == "search_knowledge"
+        for g in _toolkit.tool_groups if g.name == "basic"
+        for t in g.tools
+    )
+    logger.info(
+        "search_knowledge 工具注册%s（kb_ready=%s）",
+        "并校验通过" if _has_kb_tool else "校验未通过",
+        kb.is_ready(),
+    )
+
+    # 12. 启动定时清理任务（上传图片/过期会话/工作区；不含 memory 长期记忆）
     _cleanup_task = await cleanup.start()
+
+    # 13. 初始化 Skill 系统（Markdown 指令集 + 内网共享市场）
+    await skill_module.init_skills()
 
     logger.info("AI 办公搭子 Agent 初始化完成")
 
@@ -538,6 +607,12 @@ async def lifespan(app: FastAPI):
     # 关闭定时清理任务
     await cleanup.stop(_cleanup_task)
     _cleanup_task = None
+
+    # 关闭 Skill 系统
+    await skill_module.close_skills()
+
+    # 关闭知识库（向量库客户端与元数据库）
+    await kb.close_kb()
 
     # 关闭文档服务 HTTP 客户端
     if _http_client:
@@ -587,6 +662,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str
     attachments: list[ChatAttachment] | None = None
+    use_kb: bool = True  # 是否启用知识库检索（RAG）；False 时 search_knowledge 被权限拒绝
 
 
 class StopRequest(BaseModel):
@@ -608,6 +684,7 @@ async def health():
             and _workspace is not None
             and _http_client is not None
         ),
+        "kb_ready": kb.is_ready(),
     }
 
 
@@ -884,6 +961,288 @@ async def _upload_image(filename: str, ext: str, content: bytes, user_id: str) -
     }
 
 
+# ── 个人知识库（RAG）接口 ─────────────────────────────────────
+# 上传文档→异步抽取全文→分块→嵌入→入库（status: pending/processing/ready/failed）；
+# 可切换文档公开状态供他人检索；对话中 Agent 通过 RAGMiddleware 自动检索。
+# 知识库未就绪（嵌入模型/向量库不可用）时返回 503，便于前端给出明确提示。
+
+class KBSearchRequest(BaseModel):
+    query: str
+    top_k: int | None = None
+
+
+class KBSharedRequest(BaseModel):
+    shared: bool
+
+
+class KBEnabledRequest(BaseModel):
+    enabled: bool
+
+
+def _kb_unavailable():
+    return JSONResponse(
+        {"detail": f"知识库功能未就绪（需本地 Ollama 嵌入模型 {KB_EMBEDDING_MODEL}，请执行 `ollama pull {KB_EMBEDDING_MODEL}` 后重启服务）"},
+        status_code=503,
+    )
+
+
+@app.get("/kb/documents", summary="列出当前用户的知识库文档")
+async def kb_list_documents(user_id: str = Depends(verify_token)):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    return {"documents": await kb.list_documents(user_id)}
+
+
+@app.post("/kb/documents", summary="上传文档到个人知识库（异步索引）")
+async def kb_upload_document(
+    file: UploadFile = File(...),
+    user_id: str = Depends(verify_token),
+):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    if not file.filename or "." not in file.filename:
+        raise HTTPException(status_code=400, detail="文件名缺失或无扩展名")
+    ext = file.filename.lower().rsplit(".", 1)[-1]
+    if ext not in set(kb.supported_exts()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件类型: .{ext}，支持 PDF/Word/Excel/图片/TXT/MD/CSV",
+        )
+    content = await file.read()
+    result = await kb.create_document(user_id, file.filename, ext, content)
+    logger.info(f"知识库文档上传: user={user_id}, file={file.filename}, doc={result['doc_id']}")
+    return result
+
+
+@app.get("/kb/documents/{doc_id}", summary="获取文档索引状态与全文")
+async def kb_get_document(doc_id: str, user_id: str = Depends(verify_token)):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    doc = await kb.get_document(user_id, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return doc
+
+
+@app.patch("/kb/documents/{doc_id}", summary="切换文档是否公开供他人检索")
+async def kb_set_shared(
+    doc_id: str, req: KBSharedRequest, user_id: str = Depends(verify_token)
+):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    try:
+        updated = await kb.set_shared(user_id, doc_id, req.shared)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("切换共享失败 doc=%s", doc_id)
+        raise HTTPException(status_code=500, detail=f"切换共享失败: {e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"doc_id": doc_id, "shared": req.shared}
+
+
+@app.patch("/kb/documents/{doc_id}/enabled", summary="切换文档是否参与检索")
+async def kb_set_enabled(
+    doc_id: str, req: KBEnabledRequest, user_id: str = Depends(verify_token)
+):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    try:
+        updated = await kb.set_enabled(user_id, doc_id, req.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("切换启用失败 doc=%s", doc_id)
+        raise HTTPException(status_code=500, detail=f"切换启用失败: {e}")
+    if not updated:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"doc_id": doc_id, "enabled": req.enabled}
+
+
+@app.delete("/kb/documents/{doc_id}", summary="删除知识库文档")
+async def kb_delete_document(doc_id: str, user_id: str = Depends(verify_token)):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    deleted = await kb.delete_document(user_id, doc_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {"doc_id": doc_id, "deleted": True}
+
+
+@app.post("/kb/search", summary="检索个人知识库（本人 + 全平台公开文档）")
+async def kb_search(req: KBSearchRequest, user_id: str = Depends(verify_token)):
+    if not kb.is_ready():
+        return _kb_unavailable()
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="检索词不能为空")
+    top_k = req.top_k or kb.KB_SEARCH_TOP_K  # noqa
+    items = await kb.search(user_id, req.query, top_k)
+    return {"query": req.query, "items": items}
+
+
+# ── Skill 系统 API ────────────────────────────────────────────────────────
+class SkillCreateRequest(BaseModel):
+    name: str
+    description: str
+    tags: str = ""
+    body: str
+
+
+class SkillUpdateRequest(BaseModel):
+    name: str
+    description: str
+    tags: str = ""
+    body: str
+
+
+class SkillSharedRequest(BaseModel):
+    shared: bool
+
+
+class SkillEnabledRequest(BaseModel):
+    enabled: bool
+
+
+class SkillInstallRequest(BaseModel):
+    author_id: str
+    author_skill_id: str
+
+
+@app.get("/skills", summary="列出本人 skill（自建 + 已安装）")
+async def list_skills(user_id: str = Depends(verify_token)):
+    skills = await skill_module.list_skills(user_id)
+    return {"skills": skills}
+
+
+@app.post("/skills", summary="创建新 skill")
+async def create_skill(req: SkillCreateRequest, user_id: str = Depends(verify_token)):
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="skill 名称不能为空")
+    try:
+        result = await skill_module.create_skill(
+            user_id, req.name.strip(), req.description.strip(),
+            req.tags.strip(), req.body,
+        )
+        return result
+    except Exception as e:
+        logger.exception("创建 skill 失败")
+        raise HTTPException(status_code=500, detail=f"创建失败: {e}")
+
+
+@app.post("/skills/upload", summary="上传 SKILL.md 文件创建 skill")
+async def upload_skill(
+    file: UploadFile = File(...),
+    user_id: str = Depends(verify_token),
+):
+    if not file.filename or not file.filename.endswith(".md"):
+        raise HTTPException(status_code=400, detail="请上传 .md 格式的 SKILL.md 文件")
+    content = await file.read()
+    if len(content) > 100_000:
+        raise HTTPException(status_code=400, detail="文件过大，请控制在 100KB 以内")
+    text = content.decode("utf-8", errors="replace")
+    result, error = await skill_module.create_skill_from_upload(user_id, text)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    return result
+
+
+@app.put("/skills/{skill_id}", summary="编辑自己的 skill 内容")
+async def update_skill(
+    skill_id: str, req: SkillUpdateRequest, user_id: str = Depends(verify_token),
+):
+    result = await skill_module.update_skill(
+        user_id, skill_id, req.name.strip(), req.description.strip(),
+        req.tags.strip(), req.body,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="skill 不存在或非自建")
+    return result
+
+
+@app.get("/skills/market", summary="浏览 skill 市场（全平台公开）")
+async def market_skills(
+    tag: str | None = None,
+    keyword: str | None = None,
+    page: int = 1,
+    size: int = 20,
+    user_id: str = Depends(verify_token),
+):
+    return await skill_module.list_market_skills(user_id, tag, keyword, page, size)
+
+
+@app.get("/skills/{skill_id}", summary="获取 skill 详情")
+async def get_skill(skill_id: str, user_id: str = Depends(verify_token)):
+    result = await skill_module.get_skill(user_id, skill_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="skill 不存在")
+    return result
+
+
+@app.patch("/skills/{skill_id}", summary="切换 skill 公开状态")
+async def set_skill_shared(
+    skill_id: str, req: SkillSharedRequest, user_id: str = Depends(verify_token),
+):
+    updated = await skill_module.set_shared(user_id, skill_id, req.shared)
+    if not updated:
+        raise HTTPException(status_code=404, detail="skill 不存在或非自建")
+    return {"skill_id": skill_id, "shared": req.shared}
+
+
+@app.patch("/skills/{skill_id}/enabled", summary="切换 skill 启用状态")
+async def set_skill_enabled(
+    skill_id: str, req: SkillEnabledRequest, user_id: str = Depends(verify_token),
+):
+    updated = await skill_module.set_enabled(user_id, skill_id, req.enabled)
+    if not updated:
+        raise HTTPException(status_code=404, detail="skill 不存在")
+    return {"skill_id": skill_id, "enabled": req.enabled}
+
+
+@app.delete("/skills/{skill_id}", summary="删除 skill")
+async def delete_skill(skill_id: str, user_id: str = Depends(verify_token)):
+    deleted = await skill_module.delete_skill(user_id, skill_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="skill 不存在")
+    return {"skill_id": skill_id, "deleted": True}
+
+
+@app.post("/skills/install", summary="从市场安装 skill（快照拷贝）")
+async def install_skill(req: SkillInstallRequest, user_id: str = Depends(verify_token)):
+    try:
+        result = await skill_module.install_skill(
+            user_id, req.author_id, req.author_skill_id,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("安装 skill 失败")
+        raise HTTPException(status_code=500, detail=f"安装失败: {e}")
+
+
+@app.post("/skills/check-updates", summary="检查已安装 skill 是否有更新")
+async def check_skill_updates(user_id: str = Depends(verify_token)):
+    updates = await skill_module.check_updates(user_id)
+    return {"updates": updates}
+
+
+@app.post("/skills/{skill_id}/sync", summary="同步原作者最新版到本地副本")
+async def sync_skill(skill_id: str, user_id: str = Depends(verify_token)):
+    try:
+        result = await skill_module.sync_skill(user_id, skill_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="skill 不存在或非已安装")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("同步 skill 失败")
+        raise HTTPException(status_code=500, detail=f"同步失败: {e}")
+
+
 def _user_memory_workdir(user_id: str) -> str:
     """返回用户专属长期记忆工作目录的绝对路径。
 
@@ -954,6 +1313,14 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
     每次请求创建新的 Agent，通过传入恢复的 AgentState 实现
     会话上下文的重新注入。模型、Toolkit 等重量级资源全局共享；
     长期记忆中间件按用户隔离（每用户独立记忆目录，跨会话复用）。
+
+    RAG 采用 combined 模式（SDK 文档推荐）：
+    - static 模式（MultiTenantRAGMiddleware）：每次回复首个推理步骤前自动检索，
+      确保即使用户未显式提问也能获得知识库上下文。多租户隔离通过 contextvar
+      在 on_reasoning 时动态构造带 metadata_filter 的知识库句柄实现。
+    - agentic 模式（SearchKnowledge 工具）：Agent 自主决定何时额外检索，
+      适合后续追问或需要更精确查询的场景。
+    二者共用同一套 contextvar（user_id + use_kb），开关关闭时均跳过检索。
     """
     memory_middleware = AgenticMemoryMiddleware(
         workdir=_user_memory_workdir(user_id),
@@ -961,6 +1328,12 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
             retrieval_model=_memory_model,
         ),
     )
+    # 知识库 RAG（static 模式）：search_knowledge 工具（agentic 模式）已全局
+    # 注册到 _toolkit，通过 contextvar 按请求解析当前用户。static 中间件确保
+    # 每次回复自动检索，agentic 工具允许 Agent 按需追加检索。
+    middlewares = [memory_middleware, _ToolSchemaSanitizer()]
+    if kb.is_ready():
+        middlewares.insert(0, kb.MultiTenantRAGMiddleware())
     return Agent(
         name="office_assistant",
         system_prompt=SYSTEM_PROMPT,
@@ -970,7 +1343,7 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
         context_config=_context_config,
         injection_config=_injection_config,
         offloader=_workspace,
-        middlewares=[memory_middleware, _ToolSchemaSanitizer()],
+        middlewares=middlewares,
         state=state,
     )
 
@@ -1009,6 +1382,47 @@ def _is_retrieval_tool(name: str) -> bool:
     return (name or "").rsplit("__", 1)[-1] in _RETRIEVAL_TOOLS
 
 
+def _sanitize_path(text: str) -> str:
+    """清除文本中的服务器绝对路径，防止向前端泄露。
+
+    将 SERVICE_ROOT 及其子路径、以及 /opt/conda 等服务器专属路径
+    替换为可读的占位标记，保留文件名部分供用户辨识。
+    """
+    if not text:
+        return text
+
+    # 延迟初始化：首次调用时构造正则（路径在运行时才确定）
+    if not hasattr(_sanitize_path, "_pattern"):
+        roots = [
+            str(MEMORY_DIR),
+            str(WORKSPACE_DIR),
+            str(UPLOAD_DIR),
+            str(SERVICE_ROOT),
+        ]
+        # 按长度降序排列，确保最长路径先匹配（子路径优先于父路径）
+        roots.sort(key=len, reverse=True)
+        # 构造合并正则：匹配任一 root 后可选跟文件路径
+        combined = "|".join(re.escape(r) for r in roots)
+        _sanitize_path._pattern = re.compile(
+            rf"(?:{combined})(/[^\s\)\]\"']*)?"
+        )
+
+    def _replacer(m: re.Match) -> str:
+        suffix = m.group(1)
+        return f"<server>{suffix}" if suffix else "<server>"
+
+    result = _sanitize_path._pattern.sub(_replacer, text)
+
+    # 清除 /opt/conda 环境路径
+    result = re.sub(
+        r"/opt/conda/envs/[^\s/]+(?:/[^\s\)\]\"']*)?",
+        "<server>",
+        result,
+    )
+
+    return result
+
+
 def _process_event(event, assistant: dict) -> list[dict]:
     """将 AgentScope 事件映射为 SSE 负载，同时累积到助手消息。
 
@@ -1021,8 +1435,9 @@ def _process_event(event, assistant: dict) -> list[dict]:
     if event_type == "ThinkingBlockDeltaEvent":
         delta = getattr(event, "delta", "") or ""
         if delta:
-            assistant["thinking"] += delta
-            payloads.append({"type": "thinking", "content": delta})
+            cleaned = _sanitize_path(delta)
+            assistant["thinking"] += cleaned
+            payloads.append({"type": "thinking", "content": cleaned})
 
     elif event_type == "TextBlockDeltaEvent":
         delta = getattr(event, "delta", "") or ""
@@ -1042,17 +1457,19 @@ def _process_event(event, assistant: dict) -> list[dict]:
     elif event_type == "ToolCallDeltaEvent":
         cid = getattr(event, "tool_call_id", "")
         delta = getattr(event, "delta", "") or ""
-        _assistant_tool(assistant, cid)["args"] += delta
-        payloads.append({"type": "tool_args", "id": cid, "content": delta})
+        cleaned = _sanitize_path(delta)
+        _assistant_tool(assistant, cid)["args"] += cleaned
+        payloads.append({"type": "tool_args", "id": cid, "content": cleaned})
 
     elif event_type == "ToolResultTextDeltaEvent":
         cid = getattr(event, "tool_call_id", "")
         delta = getattr(event, "delta", "") or ""
-        _assistant_tool(assistant, cid)["result"] += delta
+        cleaned = _sanitize_path(delta)
+        _assistant_tool(assistant, cid)["result"] += cleaned
         # 检索工具结果为结构化 JSON：仍累积供结束时解析，但不下发增量，
         # 避免前端工具区显示原始 JSON（画廊帧已足够）。
         if not _is_retrieval_tool(_assistant_tool(assistant, cid)["name"]):
-            payloads.append({"type": "tool_result_delta", "id": cid, "content": delta})
+            payloads.append({"type": "tool_result_delta", "id": cid, "content": cleaned})
 
     elif event_type == "ToolResultDataDeltaEvent":
         cid = getattr(event, "tool_call_id", "")
@@ -1104,8 +1521,9 @@ def _process_event(event, assistant: dict) -> list[dict]:
         if isinstance(hint, list):
             hint = "".join(getattr(b, "text", "") for b in hint)
         if hint:
-            assistant["hint"] += hint
-            payloads.append({"type": "hint", "content": hint})
+            cleaned = _sanitize_path(hint)
+            assistant["hint"] += cleaned
+            payloads.append({"type": "hint", "content": cleaned})
 
     elif event_type == "ExceedMaxItersEvent":
         assistant["content"] = "已达最大推理轮数，请尝试简化问题或提供更多信息。"
@@ -1114,8 +1532,9 @@ def _process_event(event, assistant: dict) -> list[dict]:
     elif event_type == "ReplyEndEvent":
         error = getattr(event, "error", None)
         if error:
-            assistant["content"] = f"处理出错：{error}"
-            payloads.append({"type": "error", "content": str(error)})
+            msg = _sanitize_path(str(error))
+            assistant["content"] = f"处理出错：{msg}"
+            payloads.append({"type": "error", "content": msg})
         else:
             payloads.append({"type": "done", "content": ""})
 
@@ -1287,6 +1706,13 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     # 设置 BYPASS 权限模式，允许 MCP 工具自动执行（无需用户确认）
     state.permission_context = PermissionContext(mode=PermissionMode.BYPASS)
 
+    # 注入当前用户与知识库检索开关到 contextvar（search_knowledge 工具据此
+    # 解析属主、决定是否放行；asyncio.create_task 拷贝上下文，回复任务能继承此值）。
+    # 关闭检索时 check_permissions 返回 DENY，工具不返回任何知识库内容。
+    kb.set_kb_context(user_id, req.use_kb)
+    # Skill 系统同样通过 contextvar 按请求解析当前用户
+    skill_module.set_skill_context(user_id)
+
     # 用恢复的状态创建 Agent，注入历史上下文
     agent = _create_agent(state, user_id)
 
@@ -1419,10 +1845,11 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
                 # 异常
                 if isinstance(event, Exception):
                     logger.exception("Agent 处理出错", exc_info=event)
-                    assistant["content"] = f"处理请求时出错：{event}"
+                    err_msg = _sanitize_path(str(event))
+                    assistant["content"] = f"处理请求时出错：{err_msg}"
                     yield _sse({
                         "type": "error",
-                        "content": f"处理出错: {str(event)}",
+                        "content": f"处理出错: {err_msg}",
                     })
                     break
 

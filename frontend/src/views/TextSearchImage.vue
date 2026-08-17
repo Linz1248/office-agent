@@ -3,7 +3,6 @@
     <div class="retrieval-page">
       <header class="retrieval-header">
         <h1 class="page-title"><span class="title-accent" />文搜图</h1>
-        <p class="page-desc">输入文字描述，从图像库中检索语义最相似的图片，点击缩略图可放大查看。</p>
       </header>
 
       <section class="retrieval-controls card">

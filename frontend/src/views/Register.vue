@@ -4,17 +4,10 @@
     <div class="auth-brand">
       <div class="auth-brand-content">
         <div class="brand-logo">
-          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="32" height="32" rx="8" fill="white" fill-opacity="0.2"/>
-            <path d="M10 8.5C10 7.67 10.67 7 11.5 7H18l4 4v12.5c0 .83-.67 1.5-1.5 1.5h-9c-.83 0-1.5-.67-1.5-1.5V8.5Z" fill="white" fill-opacity="0.95"/>
-            <path d="M18 7v4h4" stroke="#2563EB" stroke-width="1.5" stroke-linejoin="round" fill="white"/>
-            <line x1="13" y1="15" x2="19" y2="15" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="13" y1="18" x2="17" y2="18" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M22.5 6.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="#FDE047"/>
-          </svg>
+          <BrandLogo :size="56" variant="glass" />
         </div>
-        <h1>智能办公平台</h1>
-        <p class="brand-tagline">文档智能处理 · 多模态检索 · AI 对话</p>
+        <h1>慧办</h1>
+        <p class="brand-tagline">智能办公平台 · 文档处理 · 多模态检索 · AI 对话</p>
 
         <div class="auth-features">
           <div class="auth-feature">
@@ -61,17 +54,10 @@
     <div class="auth-form-side">
       <div class="auth-form-box">
         <div class="form-logo">
-          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="32" height="32" rx="8" fill="#2563EB"/>
-            <path d="M10 8.5C10 7.67 10.67 7 11.5 7H18l4 4v12.5c0 .83-.67 1.5-1.5 1.5h-9c-.83 0-1.5-.67-1.5-1.5V8.5Z" fill="white" fill-opacity="0.9"/>
-            <path d="M18 7v4h4" stroke="#2563EB" stroke-width="1.5" stroke-linejoin="round" fill="white"/>
-            <line x1="13" y1="15" x2="19" y2="15" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="13" y1="18" x2="17" y2="18" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M22.5 6.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="#FDE047"/>
-          </svg>
+          <BrandLogo :size="44" />
         </div>
         <h2 class="auth-form-title">创建账号</h2>
-        <p class="auth-form-subtitle">注册以开始使用智能办公平台</p>
+        <p class="auth-form-subtitle">注册以开始使用慧办</p>
 
         <el-form
           ref="registerFormRef"
@@ -117,6 +103,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Message } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 const reg = /^\w+((.\w+)|(-\w+))@[A-Za-z0-9]+((.|-)[A-Za-z0-9]+).[A-Za-z0-9]+$/
 const router = useRouter()
@@ -253,11 +240,11 @@ const handleRegister = () => {
 }
 
 .auth-brand h1 {
-  font-size: 30px;
+  font-size: 34px;
   font-weight: 700;
   color: #F1F5F9;
   margin: 0 0 8px;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.06em;
 }
 
 .brand-tagline {

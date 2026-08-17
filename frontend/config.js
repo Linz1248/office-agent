@@ -9,3 +9,4 @@ export default {
     multimodel: `${API_BASE}/multimodel`,
     agent: `${API_BASE}/agent`,
 }
+

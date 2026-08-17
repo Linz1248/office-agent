@@ -254,12 +254,6 @@ a {
   border-radius: 2px;
   flex-shrink: 0;
 }
-.retrieval-header .page-desc {
-  margin: 0;
-  color: var(--slate);
-  font-size: 13px;
-}
-
 .retrieval-controls {
   padding: var(--space-lg);
   display: flex;
@@ -439,7 +433,7 @@ a {
 }
 
 /* ============================================================
-   库管理页共享样式（图像库管理 / 音频库管理）
+   库管理页共享样式（图像库 / 音频库）
    ============================================================ */
 .library-layout {
   display: grid;

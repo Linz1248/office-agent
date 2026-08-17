@@ -13,10 +13,17 @@ venv/
 # ---- 后端 ----
 # 预训练模型（约 3.2GB，通过 DOC_EXTRACT_PRETRAINED_MODELS 配置，需单独下载）
 backend/document_extract/pretrained_models/
-# 运行时 SQLite 数据库
-backend/document_extract/cache.db
-backend/document_extract/users.db
-backend/agent/sessions.db
+# 运行时 SQLite 数据库（含 WAL/SHM 侧车文件）
+backend/document_extract/cache.db*
+backend/document_extract/users.db*
+backend/agent/sessions.db*
+backend/agent/kb.db*
+backend/agent/skill.db*
+# 知识库 RAG 运行时数据（向量库 / 元数据 / 原始文件）
+backend/agent/kb_qdrant/
+backend/agent/kb_files/
+# Skill 系统运行时数据（SKILL.md 文件目录）
+backend/agent/skills/
 # 上传与输出目录
 backend/*/uploads/
 backend/document_compare/tmp_imgs/
@@ -36,6 +43,8 @@ backend/logs/
 # 样本/测试数据
 backend/document_compare/data/
 backend/document_extract/data/
+# pip 安装误生成的文件
+backend/=*
 
 # ---- 前端 ----
 frontend/node_modules/
@@ -45,3 +54,5 @@ frontend/dist/
 .vscode/
 .idea/
 .DS_Store
+
+**/材料/

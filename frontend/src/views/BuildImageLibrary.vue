@@ -2,8 +2,7 @@
   <div class="page-container">
     <div class="retrieval-page">
       <header class="retrieval-header">
-        <h1 class="page-title"><span class="title-accent" />图像库管理</h1>
-        <p class="page-desc">只需管理目录与图片；新增/删除后索引自动重建（全局 + 各逐库索引），无需手动操作。</p>
+        <h1 class="page-title"><span class="title-accent" />图像库</h1>
       </header>
 
       <div v-if="error" class="retrieval-state is-error card">

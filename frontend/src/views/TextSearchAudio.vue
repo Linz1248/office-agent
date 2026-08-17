@@ -3,7 +3,6 @@
     <div class="retrieval-page">
       <header class="retrieval-header">
         <h1 class="page-title"><span class="title-accent" />文本搜语音</h1>
-        <p class="page-desc">输入文字，从音频库中检索语义匹配的片段，可在播放器中定位到命中片段。</p>
       </header>
 
       <section class="retrieval-controls card">

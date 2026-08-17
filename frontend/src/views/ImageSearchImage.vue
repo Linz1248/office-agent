@@ -3,7 +3,6 @@
     <div class="retrieval-page">
       <header class="retrieval-header">
         <h1 class="page-title"><span class="title-accent" />图搜图</h1>
-        <p class="page-desc">上传一张图片，从图像库中检索视觉最相似的图片，点击缩略图可放大查看。</p>
       </header>
 
       <section class="retrieval-controls card">

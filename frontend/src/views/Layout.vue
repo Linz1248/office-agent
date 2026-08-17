@@ -4,17 +4,8 @@
     <aside class="sidebar" :class="{ collapsed: isCollapsed }">
       <!-- 品牌 -->
       <div class="sidebar-brand" @click="goHome">
-        <div class="brand-mark">
-          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="32" height="32" rx="8" fill="#2563EB"/>
-            <path d="M10 8.5C10 7.67 10.67 7 11.5 7H18l4 4v12.5c0 .83-.67 1.5-1.5 1.5h-9c-.83 0-1.5-.67-1.5-1.5V8.5Z" fill="white" fill-opacity="0.9"/>
-            <path d="M18 7v4h4" stroke="#2563EB" stroke-width="1.5" stroke-linejoin="round" fill="white"/>
-            <line x1="13" y1="15" x2="19" y2="15" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="13" y1="18" x2="17" y2="18" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M22.5 6.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="#FDE047"/>
-          </svg>
-        </div>
-        <span v-show="!isCollapsed" class="brand-text">智能办公平台</span>
+        <BrandLogo :size="32" class="brand-mark" />
+        <span v-show="!isCollapsed" class="brand-text">慧办</span>
       </div>
 
       <!-- 导航 -->
@@ -52,10 +43,10 @@
           <span class="nav-group-label">图像检索</span>
         </div>
         <router-link to="/build_image_library" class="nav-item" :class="{ active: $route.path === '/build_image_library' }">
-          <el-tooltip :content="isCollapsed ? '图像库管理' : ''" placement="right" :disabled="!isCollapsed">
+          <el-tooltip :content="isCollapsed ? '图像库' : ''" placement="right" :disabled="!isCollapsed">
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
-              <span v-show="!isCollapsed" class="nav-label">图像库管理</span>
+              <span v-show="!isCollapsed" class="nav-label">图像库</span>
             </div>
           </el-tooltip>
         </router-link>
@@ -80,10 +71,10 @@
           <span class="nav-group-label">音频检索</span>
         </div>
         <router-link to="/build_audio_library" class="nav-item" :class="{ active: $route.path === '/build_audio_library' }">
-          <el-tooltip :content="isCollapsed ? '音频库管理' : ''" placement="right" :disabled="!isCollapsed">
+          <el-tooltip :content="isCollapsed ? '音频库' : ''" placement="right" :disabled="!isCollapsed">
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
-              <span v-show="!isCollapsed" class="nav-label">音频库管理</span>
+              <span v-show="!isCollapsed" class="nav-label">音频库</span>
             </div>
           </el-tooltip>
         </router-link>
@@ -92,6 +83,38 @@
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
               <span v-show="!isCollapsed" class="nav-label">文本搜音频</span>
+            </div>
+          </el-tooltip>
+        </router-link>
+
+        <div class="nav-group" v-show="!isCollapsed">
+          <span class="nav-group-label">个人知识库</span>
+        </div>
+        <router-link to="/knowledge_base" class="nav-item" :class="{ active: $route.path === '/knowledge_base' }">
+          <el-tooltip :content="isCollapsed ? '知识库' : ''" placement="right" :disabled="!isCollapsed">
+            <div class="nav-item-inner">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              <span v-show="!isCollapsed" class="nav-label">知识库</span>
+            </div>
+          </el-tooltip>
+        </router-link>
+
+        <div class="nav-group" v-show="!isCollapsed">
+          <span class="nav-group-label">Skill 系统</span>
+        </div>
+        <router-link to="/my_skills" class="nav-item" :class="{ active: $route.path === '/my_skills' }">
+          <el-tooltip :content="isCollapsed ? '我的技能' : ''" placement="right" :disabled="!isCollapsed">
+            <div class="nav-item-inner">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14l8 8"/><path d="M13 22V13l8 8"/><path d="M13 2v7h7"/></svg>
+              <span v-show="!isCollapsed" class="nav-label">我的技能</span>
+            </div>
+          </el-tooltip>
+        </router-link>
+        <router-link to="/skill_market" class="nav-item" :class="{ active: $route.path === '/skill_market' }">
+          <el-tooltip :content="isCollapsed ? '技能市场' : ''" placement="right" :disabled="!isCollapsed">
+            <div class="nav-item-inner">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              <span v-show="!isCollapsed" class="nav-label">技能市场</span>
             </div>
           </el-tooltip>
         </router-link>
@@ -161,6 +184,7 @@ import { useUserStore } from '@/stores/user'
 import router from '@/router'
 import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 const store = useUserStore()
 const route = useRoute()
@@ -277,16 +301,11 @@ const logout = () => {
   height: 32px;
 }
 
-.brand-mark svg {
-  width: 100%;
-  height: 100%;
-}
-
 .brand-text {
   color: var(--sidebar-text-hover);
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
