@@ -122,7 +122,7 @@
                 </span>
               </template>
               <template v-else-if="msg.role === 'assistant' && msg.content">
-                <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                <MarkdownBody :content="msg.content" :streaming="msg.loading" />
               </template>
               <template v-else-if="msg.content || (msg.attachments && msg.attachments.length)">
                 <div v-if="msg.attachments && msg.attachments.length" class="msg-attachments">
@@ -254,7 +254,6 @@
                 </svg>
                 <span class="plus-menu-text">
                   <span class="plus-menu-title">上传文件</span>
-                  <span class="plus-menu-desc">PDF / Word / Excel / 图片</span>
                 </span>
               </button>
               <button
@@ -270,7 +269,6 @@
                 </svg>
                 <span class="plus-menu-text">
                   <span class="plus-menu-title">知识库检索</span>
-                  <span class="plus-menu-desc">{{ useKB ? '已开启 · 检索个人文档与共享内容' : '已关闭 · 仅用通用知识作答' }}</span>
                 </span>
                 <span class="kb-mini-switch" :class="{ on: useKB }"><span class="kb-mini-thumb"></span></span>
               </button>
@@ -306,7 +304,7 @@
           </button>
         </div>
         <div class="chat-input-meta">
-          <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行 · 点击 + 展开上传文件 / 知识库检索</p>
+          <p class="chat-input-hint">按 Enter 发送 · Shift + Enter 换行</p>
         </div>
       </footer>
     </div>
@@ -316,18 +314,10 @@
 <script setup>
 import { ref, reactive, nextTick, computed, onMounted, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import config from '/config'
 import RetrievalGallery from '@/components/RetrievalGallery.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
-
-marked.setOptions({ breaks: true, gfm: true })
-
-const renderMarkdown = (text) => {
-  if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(text))
-}
+import MarkdownBody from '@/components/MarkdownBody.vue'
 
 const store = useUserStore()
 const userInitial = computed(() => {
@@ -1304,9 +1294,15 @@ const sendMessage = async () => {
   background: var(--accent-soft);
 }
 
+/* 激活态：浅蓝实底 + 白色图标，图标旋转 45°（+ 转 ×）暗示可收起 */
 .plus-btn.active {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: #FFFFFF;
+  background: #60A5FA;
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.45);
+}
+
+.plus-btn.active:hover:not(:disabled) {
+  background: #93C5FD;
 }
 
 .plus-btn:disabled {
@@ -1317,6 +1313,11 @@ const sendMessage = async () => {
 .plus-btn svg {
   width: 20px;
   height: 20px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.plus-btn.active svg {
+  transform: rotate(45deg);
 }
 
 /* RAG 启用时的状态徽标（绿点） */
@@ -1533,98 +1534,7 @@ const sendMessage = async () => {
   padding-left: 20px;
 }
 
-/* Markdown 渲染 */
-.markdown-body {
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.markdown-body p {
-  margin: 0 0 8px;
-}
-
-.markdown-body p:last-child {
-  margin-bottom: 0;
-}
-
-.markdown-body h1,
-.markdown-body h2,
-.markdown-body h3 {
-  margin: 12px 0 6px;
-  font-weight: 600;
-}
-
-.markdown-body h1 { font-size: 18px; }
-.markdown-body h2 { font-size: 16px; }
-.markdown-body h3 { font-size: 15px; }
-
-.markdown-body ul,
-.markdown-body ol {
-  margin: 0 0 8px;
-  padding-left: 20px;
-}
-
-.markdown-body li {
-  margin: 2px 0;
-}
-
-.markdown-body code {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--mist);
-  font-size: 13px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-
-.markdown-body pre {
-  margin: 0 0 8px;
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  background: #1e293b;
-  overflow-x: auto;
-}
-
-.markdown-body pre code {
-  padding: 0;
-  background: none;
-  color: #e2e8f0;
-  font-size: 13px;
-}
-
-.markdown-body blockquote {
-  margin: 0 0 8px;
-  padding: 4px 12px;
-  border-left: 3px solid var(--accent);
-  background: var(--accent-soft);
-  color: var(--slate);
-}
-
-.markdown-body table {
-  border-collapse: collapse;
-  margin: 0 0 8px;
-  width: 100%;
-}
-
-.markdown-body th,
-.markdown-body td {
-  border: 1px solid var(--mist);
-  padding: 6px 10px;
-  text-align: left;
-}
-
-.markdown-body th {
-  background: var(--paper);
-  font-weight: 600;
-}
-
-.markdown-body a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.markdown-body a:hover {
-  text-decoration: underline;
-}
+/* Markdown 渲染样式已迁移至 global.css（全局样式可作用于 v-html 注入的元素） */
 
 /* --- 响应式 --- */
 @media (max-width: 768px) {
@@ -1715,12 +1625,6 @@ const sendMessage = async () => {
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
-}
-
-.kb-plus-popover .plus-menu-desc {
-  font-size: 11px;
-  color: var(--slate);
-  margin-top: 2px;
 }
 
 /* 菜单内迷你开关 */

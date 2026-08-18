@@ -3,7 +3,6 @@
     <div class="retrieval-page">
       <header class="retrieval-header">
         <h1 class="page-title"><span class="title-accent" />个人知识库</h1>
-        <p class="kb-subtitle">上传文档构建专属知识库，开启 RAG 检索增强；可将文档公开，供他人检索复用。</p>
       </header>
 
       <!-- 未就绪提示 -->
@@ -22,7 +21,7 @@
           </div>
           <div class="kb-stat card">
             <div class="kb-stat-num">{{ sharedCount }}</div>
-            <div class="kb-stat-label">已公开文档</div>
+            <div class="kb-stat-label">已共享文档</div>
           </div>
           <div class="kb-stat card">
             <div class="kb-stat-num">{{ totalChunks }}</div>
@@ -118,8 +117,8 @@
                       @change="(v) => toggleEnabled(d, v)"
                     />
                   </div>
-                  <div class="kb-toggle" :title="d.shared ? '已公开，他人可检索' : '仅自己可见'">
-                    <span class="kb-toggle-label">{{ d.shared ? '公开' : '私有' }}</span>
+                  <div class="kb-toggle" :title="d.shared ? '已共享，他人可检索' : '未共享，仅自己可见'">
+                    <span class="kb-toggle-label">共享</span>
                     <el-switch
                       :model-value="d.shared"
                       :loading="toggling === d.doc_id"
@@ -168,8 +167,7 @@
               <div class="kb-result-head">
                 <span class="kb-result-rank">#{{ i + 1 }}</span>
                 <span class="kb-result-file" :title="r.filename">📄 {{ r.filename || '未命名' }}</span>
-                <span v-if="r.shared" class="kb-tag is-shared">公开</span>
-                <span v-else class="kb-tag is-private">私有</span>
+                <span v-if="r.shared" class="kb-tag is-shared">共享</span>
                 <span v-if="r.owner && r.owner !== currentUserId" class="kb-tag is-owner">来自：{{ r.owner }}</span>
                 <span class="kb-result-score">相似度 {{ r.score }}</span>
               </div>
@@ -290,7 +288,7 @@ const toggleShare = async (d, v) => {
   try {
     await request.patch(`/kb/documents/${d.doc_id}`, { shared: v }, { serverName: 'agent' })
     d.shared = v
-    ElMessage.success(v ? '已公开，他人可检索此文档' : '已设为私有')
+    ElMessage.success(v ? '已共享，他人可检索此文档' : '已取消共享')
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '切换失败')
   } finally {
@@ -373,12 +371,6 @@ onUnmounted(stopPolling)
 </script>
 
 <style scoped>
-.kb-subtitle {
-  margin: -4px 0 0;
-  color: var(--slate);
-  font-size: 13px;
-}
-
 /* 统计 */
 .kb-stats {
   display: grid;
@@ -524,7 +516,6 @@ onUnmounted(stopPolling)
 .kb-result-file { font-size: 13px; font-weight: 600; color: var(--ink); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .kb-tag.is-shared { color: var(--success); background: var(--success-soft); }
-.kb-tag.is-private { color: var(--slate); background: var(--mist-light); }
 .kb-tag.is-owner { color: var(--accent); background: var(--accent-soft); }
 .kb-result-score { margin-left: auto; font-size: 12px; color: var(--slate); }
 .kb-result-text { font-size: 13px; line-height: 1.7; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; }

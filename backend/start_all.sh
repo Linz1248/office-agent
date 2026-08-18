@@ -13,13 +13,15 @@
 #   LLM_PROVIDER              (模型提供商: deepseek/openai/dashscope/ollama)
 #   SERVICE_ACCOUNT_PASSWORD  (document_extract 服务账号密码)
 #
-# 按 Ctrl+C 停止全部服务。日志位于 ./logs/。
+# PID 文件写入 run/，可用 ./stop_all.sh 随时停止；按 Ctrl+C 亦停止全部。
+# 日志位于 ./logs/。
 
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$ROOT/logs"
-mkdir -p "$LOG_DIR"
+RUN_DIR="$ROOT/run"
+mkdir -p "$LOG_DIR" "$RUN_DIR"
 
 # 自动加载项目根目录的 .env 文件
 ENV_FILE="$(cd "$ROOT/.." && pwd)/.env"
@@ -52,6 +54,20 @@ CONDA_BASE="$(conda info --base)"
 # shellcheck disable=SC1091
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 
+# ── 防重复启动 ─────────────────────────────────────────────────
+# 上一轮 PID 文件仍存活说明后端已在运行，拒绝再次启动避免端口冲突/进程堆积
+for pidfile in "$RUN_DIR"/*.pid; do
+  [ -e "$pidfile" ] || continue
+  pid="$(cat "$pidfile" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "[错误] 检测到服务仍在运行（pid=$pid，PID 文件 $pidfile）。" >&2
+    echo "        如需重启，请先执行 ./stop_all.sh" >&2
+    exit 1
+  fi
+  # 进程已不存在，清理陈旧 PID 文件
+  rm -f "$pidfile"
+done
+
 PIDS=()
 NAMES=()
 
@@ -67,6 +83,7 @@ start_service() {
   local pid=$!
   PIDS+=("$pid")
   NAMES+=("$name")
+  echo "$pid" >"$RUN_DIR/$name.pid"
   echo "        pid=$pid  log=$LOG_DIR/$name.log"
 }
 
@@ -82,24 +99,44 @@ start_script_service() {
   local pid=$!
   PIDS+=("$pid")
   NAMES+=("$name")
+  echo "$pid" >"$RUN_DIR/$name.pid"
   echo "        pid=$pid  log=$LOG_DIR/$name.log"
 }
 
 cleanup() {
+  # 防止 trap 触发时重复执行
+  [ "${CLEANUP_DONE:-0}" = "1" ] && return
+  CLEANUP_DONE=1
   echo
   echo "[停止] 正在终止所有服务..."
-  for i in "${!PIDS[@]}"; do
-    if kill "${PIDS[$i]}" 2>/dev/null; then
-      echo "        停止 ${NAMES[$i]} (pid=${PIDS[$i]})"
+  # 逆序停止：网关先下线，再停依赖它的内部服务
+  for ((i=${#PIDS[@]}-1; i>=0; i--)); do
+    local pid="${PIDS[$i]}" name="${NAMES[$i]}"
+    if kill "$pid" 2>/dev/null; then
+      echo "        停止 $name (pid=$pid)"
     fi
   done
-  # 兜底：清理可能残留的子进程
-  for pid in "${PIDS[@]}"; do
-    pkill -P "$pid" 2>/dev/null || true
+  # 等待退出，最多 5s，超时强杀（兜底清理 uvicorn 子进程）
+  local waited=0
+  while [ "$waited" -lt 50 ]; do
+    local alive=0
+    for pid in "${PIDS[@]}"; do
+      kill -0 "$pid" 2>/dev/null && alive=1
+    done
+    [ "$alive" -eq 0 ] && break
+    sleep 0.1
+    waited=$((waited+1))
   done
+  for pid in "${PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      pkill -P "$pid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -f "$RUN_DIR"/*.pid
   echo "[停止] 已终止。"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP
 
 # ── 原有服务 ──────────────────────────────────────────────────
 start_service multimodel       "$RETRIEVE_ENV" "$ROOT/multimodel"       "$MULTIMODEL_PORT"
@@ -129,7 +166,7 @@ echo "   /compare     -> document_compare (内部 ${DOC_COMPARE_PORT})"
 echo "   /agent       -> agent service    (内部 ${AGENT_PORT})"
 echo " MCP Server:     http://localhost:${OFFICE_MCP_PORT}/mcp"
 echo " 日志目录: ${LOG_DIR}/"
-echo " 按 Ctrl+C 停止全部"
+echo " 停止方式: Ctrl+C 或 ./stop_all.sh"
 echo "============================================================"
 echo
 

@@ -334,6 +334,110 @@ async def create_skill_from_upload(
     return await get_skill(user_id, skill_id), None
 
 
+async def create_skill_from_zip(
+    user_id: str, zip_bytes: bytes,
+) -> tuple[dict | None, str | None]:
+    """从上传的 zip 包创建 skill。
+
+    zip 包须包含 SKILL.md（可在根目录或唯一子目录中），可选附带
+    scripts/、references/、assets/ 等辅助资源。解压后整体作为 skill 目录。
+
+    校验流程：
+      1. 解压到临时目录
+      2. 定位 SKILL.md（根目录或唯一一级子目录）
+      3. 校验 frontmatter（name/description 必需、正文非空）
+      4. 移动到正式 skill 目录
+      5. 入库
+    """
+    if _db is None:
+        return None, "Skill 系统未初始化"
+
+    import io
+    import tempfile
+    import zipfile
+    import shutil
+
+    # 1. 解压到临时目录
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        return None, "不是有效的 zip 文件"
+
+    # 安全检查：拒绝路径穿越和过大文件
+    total_size = 0
+    for info in zf.infolist():
+        total_size += info.file_size
+        if info.file_size > 5_000_000:  # 单文件 5MB 上限
+            return None, f"zip 包中文件过大：{info.filename}（>5MB）"
+    if total_size > 50_000_000:
+        return None, "zip 包总大小超过 50MB"
+
+    tmp_dir = tempfile.mkdtemp(prefix="skill_upload_")
+    try:
+        zf.extractall(tmp_dir)
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None, f"解压失败：{e}"
+
+    try:
+        # 2. 定位 SKILL.md
+        skill_md_path = os.path.join(tmp_dir, "SKILL.md")
+        skill_root = tmp_dir
+
+        if not os.path.isfile(skill_md_path):
+            # 检查是否有唯一一级子目录包含 SKILL.md
+            subdirs = [
+                d for d in os.listdir(tmp_dir)
+                if os.path.isdir(os.path.join(tmp_dir, d))
+                and not d.startswith("__")
+                and os.path.isfile(os.path.join(tmp_dir, d, "SKILL.md"))
+            ]
+            if len(subdirs) == 1:
+                skill_root = os.path.join(tmp_dir, subdirs[0])
+                skill_md_path = os.path.join(skill_root, "SKILL.md")
+            else:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                return None, "zip 包中未找到 SKILL.md（应在根目录或唯一子目录中）"
+
+        # 3. 读取并校验 SKILL.md
+        import aiofiles
+
+        async with aiofiles.open(skill_md_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+
+        valid, name, description, tags, body = validate_skill_md(content)
+        if not valid:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return None, description  # description 位置是错误信息
+
+        # 4. 移动到正式 skill 目录
+        dir_path = _skill_dir(user_id, name)
+        # 若已存在同名目录则先清除
+        if os.path.isdir(dir_path):
+            shutil.rmtree(dir_path, ignore_errors=True)
+
+        shutil.copytree(skill_root, dir_path)
+
+        # 5. 入库
+        skill_id = str(uuid.uuid4())
+        now = _now()
+        await _db.execute(
+            "INSERT INTO skills (user_id, skill_id, name, description, shared, "
+            "enabled, dir, markdown, tags, author, source_skill_id, "
+            "source_version, source_updated_at, has_update, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, NULL, NULL, NULL, NULL, 0, ?, ?)",
+            (user_id, skill_id, name, description, dir_path, content,
+             tags, now, now),
+        )
+        await _db.commit()
+        logger.info("上传 zip 创建 skill user=%s id=%s name=%s", user_id, skill_id, name)
+        return await get_skill(user_id, skill_id), None
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 async def update_skill(
     user_id: str, skill_id: str, name: str, description: str,
     tags: str, body: str,
@@ -475,6 +579,60 @@ async def list_market_skills(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
+# ── 市场增长曲线 ─────────────────────────────────────────────────────────
+async def market_growth() -> list[dict]:
+    """市场技能累计数量增长曲线（按天连续填充，自适应步长）。
+
+    返回 ``[{"date": "YYYY-MM-DD", "count": N}, ...]``，按日期升序、
+    连续填充：无新增的日期沿用前值，曲线不断裂。步长随跨度自适应以
+    控制点数（≤90 天按天、≤365 天按 3 天、否则按周）。
+
+    用 ``created_at``（技能创建时间）作为时间锚点——市场未单独记录
+    "公开时间"，创建时间是可用的最佳近似。
+    """
+    if _db is None:
+        return []
+    cursor = await _db.execute(
+        "SELECT created_at FROM skills WHERE shared=1 AND author IS NULL",
+        (),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    if not rows:
+        return []
+
+    import datetime
+
+    today = datetime.date.today()
+    daily: dict = {}
+    for r in rows:
+        try:
+            ts = int(r["created_at"]) / 1000
+            day = datetime.datetime.fromtimestamp(ts).date()
+        except (ValueError, TypeError):
+            continue
+        daily[day] = daily.get(day, 0) + 1
+    if not daily:
+        return []
+
+    start = min(daily)
+    span_days = (today - start).days
+    step = 1 if span_days <= 90 else (3 if span_days <= 365 else 7)
+
+    points: list[dict] = []
+    running = 0
+    cur = start
+    while cur <= today:
+        bucket_end = cur + datetime.timedelta(days=step - 1)
+        d = cur
+        while d <= bucket_end and d <= today:
+            running += daily.get(d, 0)
+            d += datetime.timedelta(days=1)
+        points.append({"date": cur.isoformat(), "count": running})
+        cur += datetime.timedelta(days=step)
+    return points
+
+
 # ── 安装（快照拷贝）──────────────────────────────────────────────────────
 async def install_skill(
     user_id: str, author_id: str, author_skill_id: str,
@@ -482,6 +640,10 @@ async def install_skill(
     """从市场安装 skill：完整拷贝 SKILL.md 到安装者目录。"""
     if _db is None:
         raise RuntimeError("Skill 系统未初始化")
+
+    # 不能安装自己发布的 skill
+    if user_id == author_id:
+        raise ValueError("不能安装自己发布的 skill")
 
     # 1. 获取原作者 skill 记录
     cursor = await _db.execute(

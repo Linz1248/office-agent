@@ -1130,18 +1130,27 @@ async def create_skill(req: SkillCreateRequest, user_id: str = Depends(verify_to
         raise HTTPException(status_code=500, detail=f"创建失败: {e}")
 
 
-@app.post("/skills/upload", summary="上传 SKILL.md 文件创建 skill")
+@app.post("/skills/upload", summary="上传 SKILL.md 或 zip 包创建 skill")
 async def upload_skill(
     file: UploadFile = File(...),
     user_id: str = Depends(verify_token),
 ):
-    if not file.filename or not file.filename.endswith(".md"):
-        raise HTTPException(status_code=400, detail="请上传 .md 格式的 SKILL.md 文件")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名为空")
     content = await file.read()
-    if len(content) > 100_000:
-        raise HTTPException(status_code=400, detail="文件过大，请控制在 100KB 以内")
-    text = content.decode("utf-8", errors="replace")
-    result, error = await skill_module.create_skill_from_upload(user_id, text)
+
+    if file.filename.endswith(".md"):
+        if len(content) > 100_000:
+            raise HTTPException(status_code=400, detail="文件过大，请控制在 100KB 以内")
+        text = content.decode("utf-8", errors="replace")
+        result, error = await skill_module.create_skill_from_upload(user_id, text)
+    elif file.filename.endswith(".zip"):
+        if len(content) > 50_000_000:
+            raise HTTPException(status_code=400, detail="zip 包过大，请控制在 50MB 以内")
+        result, error = await skill_module.create_skill_from_zip(user_id, content)
+    else:
+        raise HTTPException(status_code=400, detail="请上传 .md 或 .zip 格式的 skill 文件")
+
     if error:
         raise HTTPException(status_code=400, detail=error)
     return result
@@ -1169,6 +1178,11 @@ async def market_skills(
     user_id: str = Depends(verify_token),
 ):
     return await skill_module.list_market_skills(user_id, tag, keyword, page, size)
+
+
+@app.get("/skills/market/growth", summary="市场技能累计增长曲线")
+async def market_growth(user_id: str = Depends(verify_token)):
+    return {"points": await skill_module.market_growth()}
 
 
 @app.get("/skills/{skill_id}", summary="获取 skill 详情")

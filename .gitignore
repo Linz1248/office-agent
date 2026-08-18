@@ -40,6 +40,8 @@ backend/agent/workspace/
 backend/agent/memory/
 # 日志
 backend/logs/
+# 运行时 PID 文件（由 start_all.sh 写入）
+backend/run/
 # 样本/测试数据
 backend/document_compare/data/
 backend/document_extract/data/

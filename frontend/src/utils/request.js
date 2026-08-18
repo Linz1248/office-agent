@@ -17,7 +17,7 @@ request.interceptors.request.use(cfg => {
     const server = cfg.serverName
     cfg.baseURL = config[server]
     console.log('请求的URL: '+cfg.baseURL)
-    if (server != 'multimodel'){
+    if (server != 'multimodel' && !(cfg.data instanceof FormData)){
       cfg.headers['Content-Type'] = 'application/json;charset=utf-8';
     }
     cfg.headers['Authorization'] = useUserStore().getBearerToken;  // 设置请求头

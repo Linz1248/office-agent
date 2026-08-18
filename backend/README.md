@@ -53,7 +53,17 @@ pip install -r agent/requirements.txt
 
 MCP Server（端口 9091）不通过网关暴露，仅供 Agent Service 内部调用。
 
-按 `Ctrl+C` 停止全部；日志位于 `logs/`。
+按 `Ctrl+C` 停止全部；日志位于 `logs/`。启动时各服务 PID 写入 `run/` 目录。
+
+### 停止 / 重启
+
+```bash
+./stop_all.sh        # 停止全部服务（TERM 优雅退出，超时 5s 后强杀）
+./stop_all.sh -f     # 强制停止（直接 KILL）
+./stop_all.sh && ./start_all.sh   # 重启
+```
+
+停止脚本会优先读取 `run/` 下的 PID 文件，并校验进程归属（防止 PID 复用误杀）；PID 文件缺失时按项目路径兜底扫描残留进程，最后校验端口已释放。
 
 ### 环境变量
 

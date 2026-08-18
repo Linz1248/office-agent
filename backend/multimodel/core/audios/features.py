@@ -8,7 +8,7 @@ from opencc import OpenCC
 from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
 
-# 国内 HuggingFace 镜像，避免下载模型时连不上官方源
+# 国内 HuggingFace 镜像
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 

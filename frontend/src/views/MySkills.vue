@@ -3,7 +3,6 @@
     <div class="retrieval-page">
       <header class="retrieval-header">
         <h1 class="page-title"><span class="title-accent" />我的技能</h1>
-        <p class="kb-subtitle">创建 Markdown 指令技能扩展 AI 能力，或管理从市场安装的技能；启用的技能在对话中自动注入。</p>
       </header>
 
       <!-- 统计 -->
@@ -14,11 +13,7 @@
         </div>
         <div class="kb-stat card">
           <div class="kb-stat-num">{{ mySharedCount }}</div>
-          <div class="kb-stat-label">已公开</div>
-        </div>
-        <div class="kb-stat card">
-          <div class="kb-stat-num">{{ installedCount }}</div>
-          <div class="kb-stat-label">已安装</div>
+          <div class="kb-stat-label">已共享</div>
         </div>
         <div class="kb-stat card">
           <div class="kb-stat-num">{{ enabledCount }}</div>
@@ -34,10 +29,10 @@
         </el-button>
         <el-button :loading="uploading" @click="skillFileInput?.click()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          上传 SKILL.md
+          上传技能包
         </el-button>
-        <input ref="skillFileInput" type="file" accept=".md" hidden @change="onSkillFilePick" />
-        <el-button v-if="installedCount > 0" :loading="checkingUpdates" @click="checkUpdates">
+        <input ref="skillFileInput" type="file" accept=".md,.zip" hidden @change="onSkillFilePick" />
+        <el-button v-if="mySkills.some((s) => s.author)" :loading="checkingUpdates" @click="checkUpdates">
           检查更新
         </el-button>
       </div>
@@ -64,17 +59,14 @@
             </div>
           </div>
           <div class="skill-card-desc" :title="s.description">{{ s.description }}</div>
-          <div v-if="s.tags" class="skill-card-tags">
-            <span v-for="t in s.tags.split(',')" :key="t" class="skill-tag">{{ t.trim() }}</span>
-          </div>
           <div class="skill-card-footer">
             <div class="skill-toggles">
               <div class="kb-toggle" :title="s.enabled ? '已启用' : '已禁用'">
                 <span class="kb-toggle-label">{{ s.enabled ? '启用' : '禁用' }}</span>
                 <el-switch :model-value="s.enabled" :loading="togglingEnabled === s.skill_id" @change="(v) => toggleEnabled(s, v)" />
               </div>
-              <div v-if="!s.author" class="kb-toggle" :title="s.shared ? '已公开到市场' : '仅自己可见'">
-                <span class="kb-toggle-label">{{ s.shared ? '公开' : '私有' }}</span>
+              <div v-if="!s.author" class="kb-toggle" :title="s.shared ? '已共享到市场' : '未共享，仅自己可见'">
+                <span class="kb-toggle-label">共享</span>
                 <el-switch :model-value="s.shared" :loading="toggling === s.skill_id" @change="(v) => toggleShare(s, v)" />
               </div>
             </div>
@@ -99,12 +91,9 @@
           <el-form-item label="一句话描述" required>
             <el-input v-model="formData.description" placeholder="如：当用户需要审查合同条款时使用此技能" maxlength="200" />
           </el-form-item>
-          <el-form-item label="标签（逗号分隔）">
-            <el-input v-model="formData.tags" placeholder="如：法律,合同,审查" maxlength="100" />
-          </el-form-item>
           <el-form-item label="指令正文（Markdown）" required>
             <el-input v-model="formData.body" type="textarea" :rows="12" placeholder="输入技能的详细指令步骤。智能体读取后会按此指令执行操作。" />
-            <div class="form-hint">frontmatter（name/description/tags）由系统自动生成，只需输入正文。</div>
+            <div class="form-hint">frontmatter（name/description）由系统自动生成，只需输入正文。</div>
           </el-form-item>
         </el-form>
         <template #footer>
@@ -119,9 +108,6 @@
           <div class="view-meta">
             <h3 class="view-name">{{ viewing.name }}</h3>
             <p class="view-desc">{{ viewing.description }}</p>
-            <div v-if="viewing.tags" class="skill-card-tags">
-              <span v-for="t in viewing.tags.split(',')" :key="t" class="skill-tag">{{ t.trim() }}</span>
-            </div>
           </div>
           <pre class="view-body">{{ viewing.markdown }}</pre>
         </div>
@@ -147,13 +133,12 @@ const skillFileInput = ref(null)
 
 const dialogVisible = ref(false)
 const editingId = ref('')
-const formData = ref({ name: '', description: '', tags: '', body: '' })
+const formData = ref({ name: '', description: '', body: '' })
 
 const viewVisible = ref(false)
 const viewing = ref(null)
 
 const mySharedCount = computed(() => mySkills.value.filter((s) => s.shared && !s.author).length)
-const installedCount = computed(() => mySkills.value.filter((s) => s.author).length)
 const enabledCount = computed(() => mySkills.value.filter((s) => s.enabled).length)
 
 const fetchMine = async () => {
@@ -174,7 +159,6 @@ const onSkillFilePick = async (e) => {
     formData.append('file', file)
     const res = await request.post('/skills/upload', formData, {
       serverName: 'agent',
-      headers: { 'Content-Type': 'multipart/form-data' },
     })
     if (res.status === 200) {
       ElMessage.success(`已上传技能「${res.data.name}」`)
@@ -187,13 +171,13 @@ const onSkillFilePick = async (e) => {
 
 const openCreateDialog = () => {
   editingId.value = ''
-  formData.value = { name: '', description: '', tags: '', body: '' }
+  formData.value = { name: '', description: '', body: '' }
   dialogVisible.value = true
 }
 
 const editSkill = (s) => {
   editingId.value = s.skill_id
-  formData.value = { name: s.name, description: s.description, tags: s.tags, body: s.markdown || '' }
+  formData.value = { name: s.name, description: s.description, body: s.markdown || '' }
   const fmMatch = formData.value.body.match(/^---\n[\s\S]*?\n---\n?/)
   if (fmMatch) formData.value.body = formData.value.body.slice(fmMatch[0].length).trim()
   dialogVisible.value = true
@@ -225,7 +209,7 @@ const toggleShare = async (s, v) => {
   try {
     await request.patch(`/skills/${s.skill_id}`, { shared: v }, { serverName: 'agent' })
     s.shared = v
-    ElMessage.success(v ? '已公开到市场' : '已设为私有')
+    ElMessage.success(v ? '已共享到市场' : '已取消共享')
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || '切换失败')
   } finally { toggling.value = '' }
@@ -284,9 +268,7 @@ onMounted(fetchMine)
 </script>
 
 <style scoped>
-.kb-subtitle { margin: -4px 0 0; color: var(--slate); font-size: 13px; }
-
-.kb-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-md); margin-bottom: var(--space-md); }
+.kb-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); margin-bottom: var(--space-md); }
 .kb-stat { padding: var(--space-md) var(--space-lg); text-align: center; }
 .kb-stat-num { font-size: 26px; font-weight: 700; color: var(--accent); }
 .kb-stat-label { font-size: 12px; color: var(--slate); margin-top: 2px; }
@@ -330,12 +312,6 @@ onMounted(fetchMine)
   font-size: 13px; color: var(--slate); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.skill-card-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-.skill-tag {
-  font-size: 11px; padding: 2px 8px; border-radius: 10px;
-  background: var(--mist-light); color: var(--slate);
 }
 
 .skill-card-footer {
