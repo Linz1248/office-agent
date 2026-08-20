@@ -19,6 +19,8 @@ backend/document_extract/users.db*
 backend/agent/sessions.db*
 backend/agent/kb.db*
 backend/agent/skill.db*
+# 记忆图谱审计库（SQLite，运行时自建；含 WAL/SHM 侧车文件）
+backend/agent/memory_graph.db*
 # 知识库 RAG 运行时数据（向量库 / 元数据 / 原始文件）
 backend/agent/kb_qdrant/
 backend/agent/kb_files/
@@ -38,6 +40,10 @@ backend/multimodel/repositories/
 backend/agent/workspace/
 # 长期记忆（每用户独立子目录）
 backend/agent/memory/
+# Celery beat 调度运行时文件（run_memory_worker.sh BEAT=1 生成）
+backend/agent/celerybeat-schedule.*
+# 记忆图谱基础设施安装缓存（JDK/Neo4j tarball，由 install_memory_infra.sh 按需下载）
+backend/infra/
 # 日志
 backend/logs/
 # 运行时 PID 文件（由 start_all.sh 写入）
@@ -56,5 +62,3 @@ frontend/dist/
 .vscode/
 .idea/
 .DS_Store
-
-**/材料/

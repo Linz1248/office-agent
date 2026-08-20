@@ -1,0 +1,71 @@
+# 记忆图谱模块（memory_graph）所需基础设施：Neo4j（图+向量+全文）+ PostgreSQL（来源/审计）+ Redis（计数/Celery broker）。
+#
+# 用法（在项目根目录 /root/code/office-agent 下）：
+#   docker compose -f docker-compose.memory-graph.yml up -d
+# 停止：
+#   docker compose -f docker-compose.memory-graph.yml down
+#
+# 连接信息须与 backend/agent/memory_graph/config.py 默认值或 .env 中的
+# MEMORY_GRAPH_* 变量一致。下面用同名默认值（neo4j/officeagent 等）。
+#
+# 注：office-agent 主体使用 conda 多服务，不依赖 docker；本文件仅为记忆图谱模块
+# 提供可选基础设施，与 Comet 的 docker-compose.yml 同源同构。
+
+services:
+  neo4j:
+    image: neo4j:5.26
+    container_name: officeagent-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/officeagent
+      # 向量索引与 cjk 全文分词器内置于 Neo4j 5.x，无需额外插件
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+    ports:
+      - "7687:7687"   # Bolt（memory_graph 连接）
+      - "7474:7474"   # 浏览器控制台（可选）
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:16
+    container_name: officeagent-postgres
+    environment:
+      - POSTGRES_USER=officeagent
+      - POSTGRES_PASSWORD=officeagent
+      - POSTGRES_DB=officeagent
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U officeagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: officeagent-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  postgres_data:
+  redis_data:

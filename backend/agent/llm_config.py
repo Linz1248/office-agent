@@ -59,18 +59,26 @@ if not logger.handlers:
     logger.addHandler(_h)
 
 
-def _build_model_and_formatter(*, stream: bool, thinking_enable: bool | None = None):
+def _build_model_and_formatter(
+    *,
+    stream: bool,
+    thinking_enable: bool | None = None,
+    temperature: float | None = None,
+):
     """根据 LLM_PROVIDER 构造 (model, formatter) 元组。
 
-    所有提供商共享同一份构造逻辑，仅 stream 与 thinking_enable 由调用方
-    指定，避免主模型与记忆检索模型的代码重复。
+    所有提供商共享同一份构造逻辑，仅 stream / thinking_enable / temperature 由调用方
+    指定，避免主模型与记忆检索/萃取模型的代码重复。
 
     Args:
         stream (`bool`):
-            是否启用流式输出。主推理用 True，记忆检索用 False。
+            是否启用流式输出。主推理用 True，记忆侧用 False。
         thinking_enable (`bool | None`):
             DeepSeek 思维链开关。None 表示沿用 LLM_THINKING_ENABLE；
             仅对 deepseek 提供商生效，其余提供商忽略此参数。
+        temperature (`float | None`):
+            采样温度覆盖。None 表示沿用 LLM_TEMPERATURE；记忆图谱萃取/检索
+            需低温度（0.2）以保证结构化 JSON 输出稳定。
 
     Returns:
         tuple: (model_instance, formatter_instance)
@@ -81,7 +89,7 @@ def _build_model_and_formatter(*, stream: bool, thinking_enable: bool | None = N
             base_url=DEEPSEEK_BASE_URL,
         )
         parameters = DeepSeekChatModel.Parameters(
-            temperature=LLM_TEMPERATURE,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
             thinking_enable=(
                 LLM_THINKING_ENABLE if thinking_enable is None else thinking_enable
@@ -102,7 +110,7 @@ def _build_model_and_formatter(*, stream: bool, thinking_enable: bool | None = N
             base_url=OPENAI_BASE_URL,
         )
         parameters = OpenAIChatModel.Parameters(
-            temperature=LLM_TEMPERATURE,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
         )
         formatter = OpenAIChatFormatter()
@@ -119,7 +127,7 @@ def _build_model_and_formatter(*, stream: bool, thinking_enable: bool | None = N
             api_key=DASHSCOPE_API_KEY,
         )
         parameters = DashScopeChatModel.Parameters(
-            temperature=LLM_TEMPERATURE,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
         )
         formatter = DashScopeChatFormatter()
@@ -136,7 +144,7 @@ def _build_model_and_formatter(*, stream: bool, thinking_enable: bool | None = N
             host=OLLAMA_BASE_URL,
         )
         parameters = OllamaChatModel.Parameters(
-            temperature=LLM_TEMPERATURE,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
         )
         formatter = OllamaChatFormatter()
@@ -177,4 +185,16 @@ def get_memory_model():
     generate_structured_output 的强制工具调用稳定生效。
     """
     model, _ = _build_model_and_formatter(stream=False, thinking_enable=False)
+    return model
+
+
+def get_memory_graph_chat_model():
+    """记忆图谱萃取/检索 chat 模型：非流式、非思维链、低温度（0.2）。
+
+    供 ``memory_graph`` 模块（图式长期记忆）做陈述/三元组萃取、去重判定、巩固与
+    反思等结构化输出。低温度保证 JSON 输出稳定；非流式避免与主推理流式连接冲突。
+    """
+    model, _ = _build_model_and_formatter(
+        stream=False, thinking_enable=False, temperature=0.2
+    )
     return model

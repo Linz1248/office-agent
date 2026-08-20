@@ -35,6 +35,7 @@ owns_pid() {
   args="$(ps -o args= -p "$pid" 2>/dev/null)" || return 1
   case "$args" in
     *python*"uvicorn main:app"*|*python*"server.py") return 0 ;;
+    *celery*"worker"*|*python*-m*celery*) return 0 ;;  # 记忆图谱 Celery worker
   esac
   return 1
 }
@@ -101,7 +102,16 @@ for pid in $(pgrep -f "$ROOT" 2>/dev/null || true); do
   stopped=$((stopped+1))
 done
 
-# ── 3. 端口校验 ────────────────────────────────────────────────
+# ── 3. 记忆图谱基础设施（Neo4j，随 start_all.sh best-effort 拉起的配套停止）──
+if [ -x "$ROOT/install_memory_infra.sh" ]; then
+  if "$ROOT/install_memory_infra.sh" stop >/dev/null 2>&1; then
+    echo "[记忆图谱] Neo4j 已停止"
+  else
+    echo "[记忆图谱] Neo4j 停止失败或未安装（不影响后端服务停止）"
+  fi
+fi
+
+# ── 4. 端口校验 ────────────────────────────────────────────────
 port_busy() {
   ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"
 }

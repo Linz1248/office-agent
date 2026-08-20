@@ -103,6 +103,32 @@ start_script_service() {
   echo "        pid=$pid  log=$LOG_DIR/$name.log"
 }
 
+# 启动记忆图谱 Celery worker（仅在 MEMORY_GRAPH_CELERY_ENABLED=true 时）。
+# solo 池：单进程跑任务，规避 prefork fork+asyncio+Neo4j 驱动跨进程继承的坑，
+# 适合 office-agent 单实例低并发；MEMORY_WORKER_BEAT=1（默认）同时起定时调度
+# （每日巩固/反思/聚类）。仅当 Celery 启用才起，否则中间件走进程内 asyncio 兜底。
+start_memory_worker() {
+  local name="memory_worker" env="$OFFICE_AGENT_ENV" dir="$ROOT/agent"
+  local beat_arg=""
+  [ "${MEMORY_WORKER_BEAT:-1}" = "1" ] && beat_arg="--beat"
+  echo "[启动] $name  (env=$env, pool=solo, queue=memory,beat${beat_arg:+，带 beat 调度})"
+  (
+    cd "$dir"
+    conda activate "$env"
+    # worker 入口（celery 控制台）不会把 agent/ 加入 sys.path，导致任务运行时
+    # llm_bridge 无法 import 同级顶层模块 llm_config。显式注入 PYTHONPATH。
+    export PYTHONPATH="$dir:${PYTHONPATH:-}"
+    exec celery -A memory_graph.celery_app worker \
+      --pool=solo --concurrency=1 \
+      -Q memory,beat -l info $beat_arg
+  ) >"$LOG_DIR/$name.log" 2>&1 &
+  local pid=$!
+  PIDS+=("$pid")
+  NAMES+=("$name")
+  echo "$pid" >"$RUN_DIR/$name.pid"
+  echo "        pid=$pid  log=$LOG_DIR/$name.log"
+}
+
 cleanup() {
   # 防止 trap 触发时重复执行
   [ "${CLEANUP_DONE:-0}" = "1" ] && return
@@ -135,6 +161,7 @@ cleanup() {
   done
   rm -f "$RUN_DIR"/*.pid
   echo "[停止] 已终止。"
+  echo "[提示] Neo4j（记忆图谱）未随 Ctrl+C 停止；如需停止请执行 ./stop_all.sh 或 ./install_memory_infra.sh stop"
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -142,6 +169,21 @@ trap cleanup EXIT INT TERM HUP
 start_service multimodel       "$RETRIEVE_ENV" "$ROOT/multimodel"       "$MULTIMODEL_PORT"
 start_service document_extract "$AGENT_ENV"    "$ROOT/document_extract" "$DOC_EXTRACT_PORT"
 start_service document_compare "$AGENT_ENV"    "$ROOT/document_compare" "$DOC_COMPARE_PORT"
+
+# ── 记忆图谱基础设施（Neo4j，无 Docker 原生部署）───────────────
+# best-effort 拉起：未安装时提示跳过（记忆模块自动降级旁路，不影响其他服务）；
+# 已在运行时 neo4j start 幂等无害。
+if [ -x "$ROOT/install_memory_infra.sh" ]; then
+  "$ROOT/install_memory_infra.sh" start >/dev/null 2>&1 \
+    && echo "[记忆图谱] Neo4j 已启动" \
+    || echo "[记忆图谱] Neo4j 未就绪（记忆功能降级；首次请执行 backend/install_memory_infra.sh install）"
+fi
+
+# ── 记忆图谱 Celery worker（启用 Celery 时随栈启动）─────────
+if [ "${MEMORY_GRAPH_CELERY_ENABLED:-false}" = "true" ]; then
+  start_memory_worker
+  sleep 1
+fi
 
 # ── 新增服务 ──────────────────────────────────────────────────
 # 略作等待，让原有服务端口先绑定

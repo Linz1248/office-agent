@@ -66,6 +66,11 @@ const router = createRouter({
           component: () => import('../views/KnowledgeBase.vue')
         },
         {
+          path: '/memory_graph',
+          name: 'MemoryGraph',
+          component: () => import('../views/MemoryGraph.vue')
+        },
+        {
           path: '/skill_market',
           name: 'SkillMarket',
           component: () => import('../views/SkillMarket.vue')

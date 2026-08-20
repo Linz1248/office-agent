@@ -28,7 +28,7 @@ CACHE_VERSION = 1
 # 鉴权
 SECRET_KEY = os.environ.get("DOC_EXTRACT_SECRET_KEY", "document-extract-key")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # token 有效时间，单位：分钟
+ACCESS_TOKEN_EXPIRE_MINUTES = 4320  # token 有效时间，3 天（单位：分钟）
 
 # OCR / 推理设备（PaddlePaddle 设备字符串，如 "gpu:1" / "cpu"）
 DEVICE = os.environ.get("DOC_EXTRACT_DEVICE", "gpu:1")

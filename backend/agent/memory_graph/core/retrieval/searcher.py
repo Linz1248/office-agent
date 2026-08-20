@@ -1,0 +1,223 @@
+"""记忆图谱混合检索：实体向量召回 + 全文召回 → 融合 → 邻居关系遍历。"""
+from memory_graph.config import settings
+from memory_graph.logger import get_logger
+from memory_graph.repositories.neo4j.memory_graph_repository import MemoryGraphRepository
+
+logger = get_logger(__name__)
+
+_VECTOR_WEIGHT = 0.55
+_FULLTEXT_WEIGHT = 0.30
+_IMPORTANCE_WEIGHT = 0.15
+_LONG_TERM_BONUS = 0.05
+_LONG_TERM_RELIABILITY_WEIGHT = 1.1
+_DEFAULT_CONFIDENCE = 0.8
+
+
+def _float(value: object, default: float) -> float:
+    try:
+        return float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _layer_weight(memory_layer: str | None) -> float:
+    return _LONG_TERM_RELIABILITY_WEIGHT if memory_layer == "long_term" else 1.0
+
+
+def _normalize(scores: dict[str, float]) -> dict[str, float]:
+    if not scores:
+        return {}
+    vals = list(scores.values())
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 1e-9:
+        return {k: 1.0 for k in scores}
+    return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
+
+
+def _rank_memory_hits(
+    hits: dict[str, dict],
+    semantic_scores: dict[str, float],
+    *,
+    top_k: int,
+    min_confidence: float | None,
+    use_reliability_score: bool,
+) -> list[tuple[str, float, float]]:
+    ranked: list[tuple[str, float, float]] = []
+    for eid, score in semantic_scores.items():
+        src = hits.get(eid) or {}
+        confidence = _float(src.get("confidence"), _DEFAULT_CONFIDENCE)
+        if min_confidence is not None and confidence < min_confidence:
+            continue
+        reliability_score = score
+        if use_reliability_score:
+            reliability_score = score * confidence * _layer_weight(src.get("memory_layer"))
+        ranked.append((eid, score, reliability_score))
+    ranked.sort(key=lambda x: x[2] if use_reliability_score else x[1], reverse=True)
+    return ranked[:top_k]
+
+
+def _is_uncertain(confidence: object, threshold: float | None = None) -> bool:
+    threshold = settings.active_recall_uncertain_confidence if threshold is None else threshold
+    return _float(confidence, _DEFAULT_CONFIDENCE) < threshold
+
+
+async def search_memory(
+    *,
+    embed_client,
+    user_id: str,
+    query: str,
+    top_k: int = 10,
+    recall_size: int = 20,
+    min_vector_score: float | None = None,
+    min_confidence: float | None = None,
+    use_reliability_score: bool = False,
+    query_vector: list[float] | None = None,
+) -> list[dict]:
+    """记忆检索：返回 top_k 个相关实体，每个带其一跳关系（关联事实）。"""
+    repo = MemoryGraphRepository()
+    uid = str(user_id)
+
+    vec_hits: dict[str, dict] = {}
+    vec_scores: dict[str, float] = {}
+    try:
+        qvec = query_vector if query_vector is not None else await embed_client.embed_one(query)
+        rows = await repo.search_entities_by_vector(uid, qvec, recall_size)
+        for r in rows:
+            vec_hits[r["id"]] = r
+            vec_scores[r["id"]] = float(r.get("score", 0.0))
+    except Exception as e:
+        logger.warning("记忆向量召回失败（降级仅全文）: %s", e)
+
+    ft_hits: dict[str, dict] = {}
+    ft_scores: dict[str, float] = {}
+    try:
+        rows = await repo.search_entities_by_fulltext(uid, query, recall_size)
+        for r in rows:
+            ft_hits[r["id"]] = r
+            ft_scores[r["id"]] = float(r.get("score", 0.0))
+    except Exception as e:
+        logger.warning("记忆全文召回失败: %s", e)
+
+    if not vec_hits and not ft_hits:
+        return []
+
+    all_hits = {**ft_hits, **vec_hits}
+
+    if min_vector_score is not None:
+        kept = {
+            eid: vec_scores[eid]
+            for eid in all_hits
+            if vec_scores.get(eid, 0.0) >= min_vector_score
+        }
+        if not kept:
+            return []
+        ranked = _rank_memory_hits(
+            all_hits, kept, top_k=top_k, min_confidence=min_confidence,
+            use_reliability_score=use_reliability_score,
+        )
+        if not ranked:
+            return []
+        top_ids = [eid for eid, _, _ in ranked]
+        try:
+            await repo.bump_entity_access(uid, top_ids)
+        except Exception as e:
+            logger.warning("记忆检索命中回写失败（忽略）: %s", e)
+        neighbor_rows = await repo.get_entity_neighbors(uid, top_ids)
+        relations_by_entity: dict[str, list[dict]] = {eid: [] for eid in top_ids}
+        for row in neighbor_rows:
+            eid = row.get("entity_id")
+            if eid in relations_by_entity and row.get("predicate"):
+                relations_by_entity[eid].append({
+                    "predicate": row.get("predicate"),
+                    "object_name": row.get("object_name"),
+                    "object_type": row.get("object_type"),
+                    "source_text": row.get("source_text"),
+                    "confidence": _float(row.get("confidence"), _DEFAULT_CONFIDENCE),
+                    "importance": _float(row.get("importance"), 0.5),
+                })
+        results: list[dict] = []
+        for eid, score, reliability_score in ranked:
+            src = all_hits[eid]
+            results.append({
+                "id": eid, "name": src.get("name"), "type": src.get("type"),
+                "description": src.get("description"),
+                "aliases": src.get("aliases") or [],
+                "importance": round(float(src.get("importance", 0.5) or 0.5), 3),
+                "confidence": round(_float(src.get("confidence"), _DEFAULT_CONFIDENCE), 3),
+                "memory_layer": src.get("memory_layer") or "short_term",
+                "score": round(score, 4),
+                "reliability_score": round(reliability_score, 4),
+                "relations": relations_by_entity.get(eid, []),
+            })
+        return results
+
+    vec_n = _normalize(vec_scores)
+    ft_n = _normalize(ft_scores)
+    fused: dict[str, float] = {}
+    for eid in all_hits:
+        base = _VECTOR_WEIGHT * vec_n.get(eid, 0.0) + _FULLTEXT_WEIGHT * ft_n.get(eid, 0.0)
+        importance = float(all_hits[eid].get("importance", 0.5) or 0.5)
+        score = base + _IMPORTANCE_WEIGHT * importance
+        if not use_reliability_score and (all_hits[eid].get("memory_layer") or "") == "long_term":
+            score += _LONG_TERM_BONUS
+        fused[eid] = score
+
+    ranked = _rank_memory_hits(
+        all_hits, fused, top_k=top_k, min_confidence=min_confidence,
+        use_reliability_score=use_reliability_score,
+    )
+    top_ids = [eid for eid, _, _ in ranked]
+
+    try:
+        await repo.bump_entity_access(uid, top_ids)
+    except Exception as e:
+        logger.warning("记忆检索命中回写失败（忽略）: %s", e)
+
+    neighbor_rows = await repo.get_entity_neighbors(uid, top_ids)
+    relations_by_entity: dict[str, list[dict]] = {eid: [] for eid in top_ids}
+    for row in neighbor_rows:
+        eid = row.get("entity_id")
+        if eid in relations_by_entity and row.get("predicate"):
+            relations_by_entity[eid].append({
+                "predicate": row.get("predicate"),
+                "object_name": row.get("object_name"),
+                "object_type": row.get("object_type"),
+                "source_text": row.get("source_text"),
+                "confidence": _float(row.get("confidence"), _DEFAULT_CONFIDENCE),
+                "importance": _float(row.get("importance"), 0.5),
+            })
+
+    results: list[dict] = []
+    for eid, score, reliability_score in ranked:
+        src = all_hits[eid]
+        results.append({
+            "id": eid, "name": src.get("name"), "type": src.get("type"),
+            "description": src.get("description"),
+            "aliases": src.get("aliases") or [],
+            "importance": round(float(src.get("importance", 0.5) or 0.5), 3),
+            "confidence": round(_float(src.get("confidence"), _DEFAULT_CONFIDENCE), 3),
+            "memory_layer": src.get("memory_layer") or "short_term",
+            "score": round(score, 4),
+            "reliability_score": round(reliability_score, 4),
+            "relations": relations_by_entity.get(eid, []),
+        })
+    return results
+
+
+def format_memory_context(results: list[dict]) -> str:
+    """把检索结果拼成给 LLM 的记忆上下文文本。"""
+    if not results:
+        return ""
+    lines: list[str] = []
+    for r in results:
+        prefix = "- 待确认：" if _is_uncertain(r.get("confidence")) else "- "
+        head = f"{prefix}{r['name']}（{r['type']}）：{r.get('description') or ''}".rstrip("：")
+        lines.append(head)
+        for rel in r.get("relations", []):
+            obj = rel.get("object_name") or ""
+            rel_prefix = "    · 待确认：" if _is_uncertain(rel.get("confidence")) else "    · "
+            lines.append(f"{rel_prefix}{r['name']} {rel.get('predicate')} {obj}")
+    return "\n".join(lines)
+
+
+__all__ = ["search_memory", "format_memory_context"]

@@ -178,6 +178,20 @@
                 :items="msg.results"
               />
             </div>
+
+            <!-- 复制按钮：有内容且非流式输出时显示 -->
+            <button
+              v-if="msg.content && !msg.loading"
+              class="copy-btn"
+              :class="msg.role"
+              @click="copyMessage(msg.content)"
+              title="复制"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -313,6 +327,7 @@
 
 <script setup>
 import { ref, reactive, nextTick, computed, onMounted, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import config from '/config'
 import RetrievalGallery from '@/components/RetrievalGallery.vue'
@@ -351,6 +366,20 @@ const suggestions = [
 // 本地消息 id 计数器：仅用于在内存数组中唯一标识消息，不参与持久化
 let msgId = 0
 const genId = () => ++msgId
+
+// 生成会话 id：优先用 crypto.randomUUID（安全上下文下可用），否则回退到
+// Math.random 构造的 v4 形态。UUID4 使多用户同一毫秒各发首条消息也不会撞库，
+// 且不可枚举（后端 offload/会话已按 user_id 隔离，此处为纵深防御）。
+const newSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
 
 const authHeaders = () => ({ 'Authorization': store.getBearerToken })
 
@@ -439,6 +468,15 @@ const scrollToBottom = () => {
 const useSuggestion = (text) => {
   inputText.value = text
   sendMessage()
+}
+
+const copyMessage = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择文本')
+  }
 }
 
 // ── 文件上传 ──
@@ -558,7 +596,7 @@ const sendMessage = async () => {
 
   // 首条消息时创建新会话（本地占位，后端在 /chat 落盘）
   if (!currentSessionId.value) {
-    currentSessionId.value = String(Date.now())
+    currentSessionId.value = newSessionId()
     sessions.value.unshift({
       id: currentSessionId.value,
       title: (text || `上传了 ${readyAttachments.length} 个文件`).slice(0, 30),
@@ -1111,14 +1149,17 @@ const sendMessage = async () => {
   padding: 10px 14px;
   border-radius: var(--radius-md);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
   word-break: break-word;
+  -webkit-font-smoothing: antialiased;
 }
 
 .message-bubble.user {
   background: var(--accent);
   color: #fff;
   border-bottom-right-radius: 4px;
+  font-weight: 400;
 }
 
 .message-bubble.assistant {
@@ -1126,10 +1167,64 @@ const sendMessage = async () => {
   color: var(--ink);
   border: 1px solid var(--mist);
   border-bottom-left-radius: 4px;
+  font-weight: 400;
+}
+
+.message-bubble.assistant .message-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-soft);
+}
+
+.message-bubble.user .message-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #fff;
 }
 
 .message-text {
   white-space: pre-wrap;
+}
+
+/* 复制按钮：hover 气泡时淡入 */
+.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--slate-light);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.15s ease, color 0.15s ease;
+  align-self: flex-start;
+}
+
+/* 用户消息在右侧，复制按钮靠右 */
+.copy-btn.user {
+  align-self: flex-end;
+}
+
+.copy-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.copy-btn:hover {
+  background: var(--mist-light);
+  color: var(--ink-soft);
+}
+
+.copy-btn:active {
+  transform: scale(0.94);
+}
+
+.message-row:hover .copy-btn {
+  opacity: 1;
 }
 
 /* 打字动画 */

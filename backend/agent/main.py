@@ -19,13 +19,14 @@
   - 会话以 (user_id, session_id) 复合主键隔离，用户间互不可见。
 
 长期记忆:
-  - 通过 AgenticMemoryMiddleware 实现：智能体自主将用户偏好、历史决策与知识
-    沉淀为 Markdown 文件，跨会话复用。
-  - 每个用户拥有独立的记忆工作目录（MEMORY_DIR/<user_id>），用户间互不可见。
-  - 中间件将 MEMORY.md 索引注入系统提示，并在每次回复前异步检索相关记忆文件
-    以 HintBlock 形式插入上下文；检索使用独立的非流式/非思维链模型，避免与主
-    推理流式连接冲突。
-  - 智能体通过 Read/Write/Edit 工具自主创建、读取与修订记忆文件。
+  - 通过 memory_graph（图式长期记忆）实现：智能体在每轮对话后自动萃取用户偏好、
+    身份、关系、事件与历史决策，写入 Neo4j 记忆图谱（实体/陈述/关系/事件/社区/洞察），
+    跨会话复用。按 user_id 多租户隔离。
+  - 每次回复前，MemoryGraphMiddleware 自动召回与当前问题相关的记忆和洞察作为
+    HintBlock 注入；检索与萃取使用独立的非流式/低温度 sidecar 模型，避免与主推理
+    流式连接冲突。Agent 亦可主动调用 memory_search 工具按需检索。
+  - 记忆图谱经 /memories/* 接口暴露（前端「记忆图谱」页可视化）。
+  - 模块可拔插：Neo4j/PG/Redis 不可用时 is_ready()=False，模块旁路，其余能力正常。
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 import aiosqlite
@@ -55,9 +57,11 @@ from agentscope.agent import (
     ContextConfig,
     InjectionConfig,
 )
+from agentscope.credential import OllamaCredential
+from agentscope.embedding import OllamaEmbeddingModel
 from agentscope.message import Msg, UserMsg
 from agentscope.mcp import MCPClient, HttpMCPConfig
-from agentscope.middleware import AgenticMemoryMiddleware, MiddlewareBase
+from agentscope.middleware import MiddlewareBase
 from agentscope.state import AgentState
 from agentscope.permission import PermissionContext, PermissionMode
 from agentscope.event import (
@@ -88,7 +92,9 @@ from config import (
     INJECTION_TIMEZONE,
     JWT_ALGORITHM,
     JWT_SECRET_KEY,
+    KB_EMBEDDING_DIM,
     KB_EMBEDDING_MODEL,
+    KB_OLLAMA_HOST,
     LLM_PROVIDER,
     LLM_THINKING_ENABLE,
     MEMORY_DIR,
@@ -103,11 +109,16 @@ from config import (
     UPLOAD_DIR,
     WORKSPACE_DIR,
 )
-from llm_config import get_model_and_formatter, get_memory_model
+from llm_config import (
+    get_model_and_formatter,
+    get_memory_graph_chat_model,
+    get_memory_model,
+)
 import cleanup  # 定时清理（上传图片/过期会话/工作区，不含 memory）
 import skill as skill_module  # Skill 系统（Markdown 指令集 + 内网共享市场）
 from ask_user import AskUser  # human-in-loop 外部工具（检索前追问补全信息）
 import kb  # 个人知识库 RAG（嵌入/向量库/检索；未就绪时优雅降级）
+import memory_graph  # 图式长期记忆（Neo4j 记忆图谱；未就绪时优雅降级）
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -149,7 +160,7 @@ Skill 系统（技能指令）：
 
 任务管理与文件操作：
 - TaskCreate / TaskUpdate / TaskList / TaskGet：创建和跟踪任务计划，适合复杂多步任务
-- Read / Write / Edit：读写文件，用于管理长期记忆（详见下方"长期记忆"部分）
+- Read / Write / Edit：读写文件（工作区与临时文件操作）
 
 文件上传：
 用户可以在对话框中上传 PDF、Word(.docx/.doc)、Excel(.xlsx/.xls) 或图片。上传成功后，消息会附带文件信息：
@@ -175,24 +186,18 @@ Skill 系统（技能指令）：
 - 多媒体检索（search_images_by_text / search_images_by_image / search_audios_by_text）的 human-in-loop：若用户已明确「搜索关键词」和「期望返回数量」，直接调用对应检索工具（数量作为 top_k）；若二者之一缺失（如只说"找几张起重机的图"但没说几张），先调用 ask_user 工具向用户追问（例如 question="请补充：搜索关键词，以及想要返回多少条结果", options=["3 条","5 条","10 条"]），拿到用户作答后再调用检索工具。检索结果（图片/音频）会以画廊形式自动展示给用户，你只需用一句话概述检索结果，不要复述文件路径。
 
 长期记忆（重要）：
-你拥有一个基于 Markdown 文件的长期记忆系统，跨会话持久保存。系统已在每次对话时将记忆索引（MEMORY.md）注入到你的上下文中，并在回复前异步检索相关记忆文件作为提示。
-- 何时保存：当你从对话中学到以下信息时，应**主动**用 Write 工具保存记忆（无需用户要求）：
-  · 用户偏好：如"我喜欢简洁的回复"、"用中文回答"、"不要加 emoji"等
-  · 用户角色：如用户的职业、技术背景、所在行业等
-  · 工作反馈：如用户纠正你的做法（"不要这样做"）或确认你的做法（"对，就这样"）
-  · 项目背景：如用户提到的项目目标、截止日期、关键约束等
-- 何时不保存：不要保存当前对话的临时状态、可通过工具直接获取的信息、或用户明确说"不要记"的内容。
-- 如何保存（两步）：
-  1. 用 Write 工具将记忆写入独立的 .md 文件（如 user_preference.md），文件开头使用 frontmatter 格式：
-     ---
-     name: 记忆名称
-     description: 一句话描述何时应检索此记忆
-     type: user/feedback/project/reference
-     ---
-     （正文为记忆内容；feedback/project 类型应包含 **Why:** 和 **How to apply:** 行）
-  2. 用 Edit 工具在 MEMORY.md 中添加一行索引：- [标题](文件名.md) — 一句话描述
-- 用户明确要求"记住"某事时，立即保存；要求"忘记"某事时，找到并删除对应记忆文件和索引行。
-- 记忆文件保存在系统提示中注入的记忆目录下，直接写入即可，无需创建目录。
+你拥有一个图式长期记忆系统，跨会话持久保存用户偏好、身份、关系、事件与历史决策。
+- 记忆是**自动**的：系统会在每轮对话后自动从你的回复与用户输入中萃取记忆写入图谱，
+  无需你手动保存，也不要用 Write/Edit 去维护记忆文件。
+- 每次回复前，系统会自动召回与当前问题相关的记忆和高层洞察作为背景提示注入；你应
+  自然参考这些背景作答，禁止在回复中提及记忆、背景信息或其来源，不要说"根据记忆"
+  "根据我的长期记忆""我记得"等任何暗示存在记忆系统的话，直接回答即可。
+  待确认的内容不要当作确定事实。
+- memory_search 工具：当你需要更精确地回忆特定内容（如追问历史偏好、项目背景、
+  过去提到的人或事）时，可主动调用 memory_search 检索记忆图谱。通用问题无需调用。
+- 当用户明确要求"记住某事"时，告诉用户系统会自动记住，也可让用户到「记忆图谱」页面
+  主动添加或核查；要求"忘记某事"时，提示用户在「记忆图谱」页面删除对应实体。
+- 不要把当前对话的临时状态、可通过工具直接获取的信息当作长期记忆去强调。
 
 工作原则：
 - 始终使用中文回复，保持简洁专业。
@@ -423,6 +428,10 @@ _injection_config: InjectionConfig | None = None
 _workspace: LocalWorkspace | None = None
 _session_store: SessionStore | None = None
 _cleanup_task = None  # 定时清理后台任务句柄（lifespan 中创建/取消）
+# 图式长期记忆（memory_graph）：复用 KB 的 Ollama 嵌入 + 低温度 sidecar chat 模型
+_mg_chat_model = None
+_mg_embedding_model = None
+_mg_middleware: memory_graph.MemoryGraphMiddleware | None = None
 
 # 活跃回复任务注册表：key = "user_id:session_id"，用于支持停止输出
 _active_reply_tasks: dict[str, asyncio.Task] = {}
@@ -443,6 +452,42 @@ _http_client: httpx.AsyncClient | None = None
 _extract_token: str | None = None
 _extract_token_expires: float = 0.0
 
+# 上下文卸载属主：/chat 注入当前 user_id，_UserScopedWorkspace 据此按用户隔离
+# offload 落盘路径。asyncio.create_task 拷贝上下文，回复任务能继承此值。
+_offload_user: ContextVar[str] = ContextVar("offload_user", default="")
+
+
+def set_offload_user_context(user_id: str) -> None:
+    """注入当前用户到 offload contextvar，供卸载工作区按用户隔离目录。"""
+    _offload_user.set(user_id)
+
+
+class _UserScopedWorkspace(LocalWorkspace):
+    """按用户隔离上下文卸载目录的 LocalWorkspace。
+
+    复用 LocalWorkspace 全部能力（技能/MCP/文件工具），仅覆盖 offload_context /
+    offload_tool_result：把 session_id 重映射为 ``<user_id>/<session_id>``，使落盘
+    路径从 ``sessions/<session_id>/`` 变为 ``sessions/<user_id>/<session_id>/``，
+    杜绝不同用户使用相同 session_id（或伪造/枚举 session_id）时卸载文件串扰——
+    即使前端 session_id 撞库，卸载层仍按用户物理隔离。data/ 多模态块按内容哈希
+    寻址（``data/<sha256>.<ext>``），天然无冲突，无需改写。无 user_id（非 /chat
+    路径，如离线脚本）时退化为原 session_id 单键行为。
+    """
+
+    def _scoped_session_id(self, session_id: str) -> str:
+        uid = _offload_user.get()
+        return f"{uid}/{session_id}" if uid else session_id
+
+    async def offload_context(self, session_id: str, msgs):
+        return await super().offload_context(
+            self._scoped_session_id(session_id), msgs
+        )
+
+    async def offload_tool_result(self, session_id: str, tool_result):
+        return await super().offload_tool_result(
+            self._scoped_session_id(session_id), tool_result
+        )
+
 
 async def _get_extract_token() -> str:
     """使用服务账号登录 document_extract 服务，获取 JWT token。"""
@@ -460,7 +505,7 @@ async def _get_extract_token() -> str:
     resp.raise_for_status()
     data = resp.json()
     _extract_token = data["access_token"]
-    _extract_token_expires = time.time() + data.get("expiresIn", 86400000) / 1000
+    _extract_token_expires = time.time() + data.get("expiresIn", 259200000) / 1000
     return _extract_token
 
 
@@ -469,6 +514,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时创建共享资源，关闭时清理。"""
     global _model, _memory_model, _toolkit, _react_config, _context_config
     global _injection_config, _workspace, _session_store, _http_client, _cleanup_task
+    global _mg_chat_model, _mg_embedding_model, _mg_middleware
 
     logger.info("正在初始化 AI 办公搭子 Agent...")
     logger.info(f"LLM 提供商: {LLM_PROVIDER}, thinking_enable: {LLM_THINKING_ENABLE}")
@@ -477,8 +523,8 @@ async def lifespan(app: FastAPI):
     # 1. 创建统一 LLM 模型（formatter 已在模型内部设置）
     _model, _ = get_model_and_formatter()
 
-    # 2. 创建长期记忆检索模型（非流式、非思维链，供 AgenticMemoryMiddleware
-    #    异步选择相关记忆文件；与主推理模型分离以避免流式连接冲突）
+    # 2. 创建 sidecar 模型（非流式、非思维链）；图式长期记忆用低温度变体
+    #    _mg_chat_model（见下文步骤 13），此处 _memory_model 仅作就绪占位与历史兼容
     _memory_model = get_memory_model()
 
     # 3. 创建 MCP 客户端（无状态 HTTP，无需手动 connect/close）
@@ -552,7 +598,7 @@ async def lifespan(app: FastAPI):
     )
 
     # 7. 初始化工作区（作为 offloader 持久化被压缩的消息与截断的工具结果）
-    _workspace = LocalWorkspace(workdir=str(WORKSPACE_DIR))
+    _workspace = _UserScopedWorkspace(workdir=str(WORKSPACE_DIR))
     await _workspace.initialize()
     logger.info(f"上下文卸载工作区: {WORKSPACE_DIR}")
 
@@ -597,6 +643,32 @@ async def lifespan(app: FastAPI):
     # 12. 启动定时清理任务（上传图片/过期会话/工作区；不含 memory 长期记忆）
     _cleanup_task = await cleanup.start()
 
+    # 13. 初始化图式长期记忆（memory_graph）：复用 KB 的 Ollama 嵌入 + 低温度 sidecar
+    #     chat 模型。Neo4j / PG 不可用时优雅降级（is_ready()=False，模块旁路，其余正常）。
+    _mg_chat_model = get_memory_graph_chat_model()
+    _mg_embedding_model = OllamaEmbeddingModel(
+        credential=OllamaCredential(host=KB_OLLAMA_HOST),
+        model=KB_EMBEDDING_MODEL,
+        dimensions=KB_EMBEDDING_DIM,
+    )
+    # 维度与 KB 嵌入对齐，保证 Neo4j 向量索引维度与实际向量一致
+    try:
+        memory_graph.settings.embedding_dims = KB_EMBEDDING_DIM
+    except Exception:
+        pass
+    await memory_graph.init_memory_graph(
+        chat_model=_mg_chat_model, embedding_model=_mg_embedding_model
+    )
+    _mg_middleware = memory_graph.MemoryGraphMiddleware()
+    # 注册 memory_search 工具到 Toolkit（agent_control / both 模式；static 模式返回空）
+    if memory_graph.is_ready() and _mg_middleware is not None:
+        for _mg_tool in await _mg_middleware.list_tools():
+            await _toolkit.add_tool(_mg_tool)
+    logger.info(
+        "图式长期记忆: ready=%s, mode=%s",
+        memory_graph.is_ready(), memory_graph.settings.control_mode,
+    )
+
     # 13. 初始化 Skill 系统（Markdown 指令集 + 内网共享市场）
     await skill_module.init_skills()
 
@@ -613,6 +685,9 @@ async def lifespan(app: FastAPI):
 
     # 关闭知识库（向量库客户端与元数据库）
     await kb.close_kb()
+
+    # 关闭图式长期记忆（Neo4j / PG / Redis 连接）
+    await memory_graph.close_memory_graph()
 
     # 关闭文档服务 HTTP 客户端
     if _http_client:
@@ -635,6 +710,9 @@ async def lifespan(app: FastAPI):
     _workspace = None
     _session_store = None
     _http_client = None
+    _mg_chat_model = None
+    _mg_embedding_model = None
+    _mg_middleware = None
     logger.info("Agent 已关闭")
 
 
@@ -647,6 +725,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 记忆图谱路由（/memories/*，经网关 /agent/memories/* 暴露）；注入鉴权依赖
+memory_graph.set_auth_dependency(verify_token)
+app.include_router(memory_graph.router)
 
 
 class ChatAttachment(BaseModel):
@@ -1257,17 +1339,6 @@ async def sync_skill(skill_id: str, user_id: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=f"同步失败: {e}")
 
 
-def _user_memory_workdir(user_id: str) -> str:
-    """返回用户专属长期记忆工作目录的绝对路径。
-
-    对 user_id 做文件名安全化处理，防止路径穿越：仅保留字母、数字、
-    ``._-``，其余字符替换为下划线，并剥离首尾的 ``._-`` 以避免
-    ``..`` 等危险片段。
-    """
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", user_id).strip("._-")
-    return str(MEMORY_DIR / (safe or "default"))
-
-
 class _ToolSchemaSanitizer(MiddlewareBase):
     """清理工具 schema 中 DeepSeek 等 LLM 不支持的关键字。
 
@@ -1336,18 +1407,15 @@ def _create_agent(state: AgentState, user_id: str) -> Agent:
       适合后续追问或需要更精确查询的场景。
     二者共用同一套 contextvar（user_id + use_kb），开关关闭时均跳过检索。
     """
-    memory_middleware = AgenticMemoryMiddleware(
-        workdir=_user_memory_workdir(user_id),
-        parameters=AgenticMemoryMiddleware.Parameters(
-            retrieval_model=_memory_model,
-        ),
-    )
-    # 知识库 RAG（static 模式）：search_knowledge 工具（agentic 模式）已全局
-    # 注册到 _toolkit，通过 contextvar 按请求解析当前用户。static 中间件确保
-    # 每次回复自动检索，agentic 工具允许 Agent 按需追加检索。
-    middlewares = [memory_middleware, _ToolSchemaSanitizer()]
+    # 长期记忆：图式记忆图谱中间件（memory_graph）。未就绪时旁路，不挂载。
+    # search_knowledge / memory_search 工具已全局注册到 _toolkit，通过 contextvar
+    # 按请求解析当前用户；static 中间件确保每次回复自动召回注入。
+    middlewares: list = []
     if kb.is_ready():
-        middlewares.insert(0, kb.MultiTenantRAGMiddleware())
+        middlewares.append(kb.MultiTenantRAGMiddleware())
+    if memory_graph.is_ready() and _mg_middleware is not None:
+        middlewares.append(_mg_middleware)
+    middlewares.append(_ToolSchemaSanitizer())
     return Agent(
         name="office_assistant",
         system_prompt=SYSTEM_PROMPT,
@@ -1726,6 +1794,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     kb.set_kb_context(user_id, req.use_kb)
     # Skill 系统同样通过 contextvar 按请求解析当前用户
     skill_module.set_skill_context(user_id)
+    # 图式长期记忆同样按请求解析当前用户（memory_search 工具 / 写回据此隔离）
+    memory_graph.set_memory_context(user_id)
+    # 上下文卸载按用户隔离目录（_UserScopedWorkspace 据此重映射 session_id）
+    set_offload_user_context(user_id)
 
     # 用恢复的状态创建 Agent，注入历史上下文
     agent = _create_agent(state, user_id)

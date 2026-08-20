@@ -3,8 +3,9 @@
 清理对象：
 - uploads/                用户上传图片副本（file_path，供 read_image / 以图搜图）
 - sessions.db             过期会话行（按 updated_at，epoch 毫秒文本）
-- workspace/sessions/<id>/ 仅清理「孤儿」（session_id 已不在 sessions.db 的目录）；
-                           不按 mtime 删，避免破坏仍可恢复的活跃会话的卸载工具结果
+- workspace/sessions/  仅清理「孤儿」（叶子目录名 session_id 已不在 sessions.db）；
+  布局为按用户隔离的 sessions/<user_id>/<session_id>/，兼容旧版扁平 sessions/<id>/；
+  不按 mtime 删，避免破坏仍可恢复的活跃会话的卸载工具结果
 - workspace/<task>/        非会话的任务草稿目录（如 gen_excel.py 等智能体自建产物），按 mtime 清理
 - memory/<user>/          长期记忆 —— 永不清理（与 workspace 同级，本模块不访问它）
 
@@ -120,8 +121,13 @@ def reap_workspace(
 ) -> int:
     """清理 workspace：
 
-    - workspace/sessions/<id>/：仅当 <id> 不在 active_ids（即会话已从 DB 删除，成孤儿）
-      才整目录回收；否则保留（活跃会话的卸载工具结果需可按需回查）。
+    - workspace/sessions/ 下的卸载目录按 session_id 单键回收：
+      叶子目录（直接含 context.jsonl / tool_result 等文件的目录）名不在
+      active_ids 即视为孤儿，整目录回收。兼容两种落盘布局——旧版扁平
+      ``sessions/<session_id>/`` 与新版按用户隔离的
+      ``sessions/<user_id>/<session_id>/``（后者叶子目录名仍是 session_id，
+      故同一套判定即可；空 ``<user_id>`` 目录随后由 _remove_empty_dirs 回收）。
+      活跃会话目录受保护，以保留其可按需回查的卸载工具结果。
     - workspace/<name>/（非 sessions、非 memory）：按 mtime 超过保留期则回收（任务草稿）。
     - 绝不触碰 memory/（与 workspace 同级，本函数不访问）。
     返回回收的目录数。
@@ -134,12 +140,18 @@ def reap_workspace(
 
     sessions_root = ws / "sessions"
     if sessions_root.exists():
-        for sub in sessions_root.iterdir():
-            if not sub.is_dir():
+        # 自底向上遍历：只回收"叶子目录"（直接含文件的目录），其名为 session_id。
+        # 不在 active_ids 即孤儿。父级（用户）目录随后清空即由 _remove_empty_dirs 删。
+        for dirpath, _dirnames, filenames in os.walk(
+            sessions_root, topdown=False
+        ):
+            p = Path(dirpath)
+            if p == sessions_root or not filenames:
                 continue
-            if sub.name not in active_ids:  # 孤儿会话 → 回收
-                shutil.rmtree(sub, ignore_errors=True)
+            if p.name not in active_ids:  # 孤儿会话 → 回收
+                shutil.rmtree(p, ignore_errors=True)
                 removed += 1
+        _remove_empty_dirs(sessions_root)  # 清理空的 <user_id> 中间目录
 
     # 非会话、非 memory 的任务草稿目录，按 mtime 清理
     for sub in ws.iterdir():

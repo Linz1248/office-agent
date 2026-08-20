@@ -15,7 +15,7 @@
       <nav class="sidebar-nav">
         <!-- AI 办公搭子（始终置顶、渐变突出） -->
         <el-tooltip content="AI 办公搭子" placement="right" :disabled="!isCollapsed">
-          <router-link to="/agent" class="nav-item nav-item--accent" :class="{ active: $route.path === '/agent' }">
+          <router-link to="/agent" class="nav-item nav-item--accent" :class="{ active: $route.path === '/agent' }" :aria-current="$route.path === '/agent' ? 'page' : undefined">
             <div class="nav-item-inner">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.agent"></svg>
               <span v-show="!isCollapsed" class="nav-label">AI 办公搭子</span>
@@ -35,19 +35,22 @@
           </div>
 
           <!-- 展开态子项（纯文本，无图标） -->
-          <div v-show="!isCollapsed && expandedGroups.has(group.label)" class="nav-section-items">
+          <transition name="nav-section-collapse">
+            <div v-show="!isCollapsed && expandedGroups.has(group.label)" class="nav-section-items">
             <router-link
               v-for="item in group.items"
               :key="item.path"
               :to="item.path"
               class="nav-item"
               :class="{ active: $route.path === item.path }"
+              :aria-current="$route.path === item.path ? 'page' : undefined"
             >
               <div class="nav-item-inner">
                 <span class="nav-label">{{ item.label }}</span>
               </div>
             </router-link>
-          </div>
+            </div>
+          </transition>
 
           <!-- 折叠态：一级菜单分组图标（单项直达，多项悬浮弹出二级菜单） -->
           <el-tooltip
@@ -59,6 +62,7 @@
               :to="group.items[0].path"
               class="nav-collapsed-group"
               :class="{ active: $route.path === group.items[0].path }"
+              :aria-current="$route.path === group.items[0].path ? 'page' : undefined"
             >
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" v-html="group.icon"></svg>
             </router-link>
@@ -85,6 +89,7 @@
                 :to="item.path"
                 class="nav-flyout-item"
                 :class="{ active: $route.path === item.path }"
+                :aria-current="$route.path === item.path ? 'page' : undefined"
               >{{ item.label }}</router-link>
             </div>
           </el-popover>
@@ -93,23 +98,27 @@
 
       <!-- 用户区 -->
       <div class="sidebar-footer">
-        <el-dropdown trigger="click" placement="top-start">
-          <div class="user-chip">
-            <div class="user-avatar">{{ username.charAt(0).toUpperCase() }}</div>
-            <span v-show="!isCollapsed" class="user-name">{{ username }}</span>
-            <svg v-show="!isCollapsed" class="user-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item @click="dialogFormVisible = true">
-                修改密码
-              </el-dropdown-item>
-              <el-dropdown-item divided @click="logout">
-                退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <div class="user-area">
+          <el-dropdown trigger="click" placement="top-start">
+            <div class="user-chip">
+              <div class="user-avatar">{{ username.charAt(0).toUpperCase() }}</div>
+              <span v-show="!isCollapsed" class="user-name">{{ username }}</span>
+              <svg v-show="!isCollapsed" class="user-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="goMemory">记忆</el-dropdown-item>
+                <el-dropdown-item @click="dialogFormVisible = true">
+                  修改密码
+                </el-dropdown-item>
+                <el-dropdown-item divided @click="logout">
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <ThemeToggle :collapsed="isCollapsed" class="theme-toggle-btn" />
+        </div>
       </div>
 
       <!-- 侧边栏收起/展开按钮 -->
@@ -120,10 +129,6 @@
 
     <!-- 主内容区 -->
     <main class="main-content">
-      <!-- 主题切换浮动按钮 -->
-      <div class="theme-fab">
-        <ThemeToggle />
-      </div>
       <router-view />
     </main>
   </div>
@@ -181,6 +186,11 @@ const toggleCollapse = () => {
 // 点击品牌区跳转首页
 const goHome = () => {
   router.push('/agent')
+}
+
+// 头像下拉：进入记忆图谱
+const goMemory = () => {
+  router.push('/memory_graph')
 }
 
 // ── 菜单图标（统一在此定义，重复图标直接复用） ──
@@ -347,11 +357,15 @@ const logout = () => {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition);
+  transition: background var(--transition), transform var(--transition);
 }
 
 .sidebar-brand:hover {
   background: var(--sidebar-hover);
+}
+
+.sidebar-brand:active {
+  transform: scale(0.98);
 }
 
 .brand-mark {
@@ -455,11 +469,30 @@ const logout = () => {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  transition: transform 0.2s ease;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .nav-section-chevron.expanded {
   transform: rotate(90deg);
+}
+
+/* 分组子项展开/收起过渡 */
+.nav-section-collapse-enter-active,
+.nav-section-collapse-leave-active {
+  transition: opacity 0.2s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.nav-section-collapse-enter-from,
+.nav-section-collapse-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+
+.nav-section-collapse-enter-to,
+.nav-section-collapse-leave-from {
+  opacity: 1;
+  max-height: 500px;
 }
 
 .nav-section-items {
@@ -496,13 +529,18 @@ const logout = () => {
   position: absolute;
   left: -10px;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-50%) scaleY(0.5);
   width: 3px;
   height: 16px;
   border-radius: 0 3px 3px 0;
   background: var(--sidebar-indicator);
   opacity: 0;
-  transition: opacity var(--transition);
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.nav-item:hover .nav-item-inner::before {
+  opacity: 0.4;
+  transform: translateY(-50%) scaleY(0.7);
 }
 
 .nav-item:hover .nav-item-inner {
@@ -518,6 +556,15 @@ const logout = () => {
 
 .nav-item.active .nav-item-inner::before {
   opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
+.nav-item:focus-visible {
+  outline: none;
+}
+
+.nav-item:focus-visible .nav-item-inner {
+  box-shadow: 0 0 0 2px var(--sidebar-indicator);
 }
 
 .nav-icon {
@@ -537,12 +584,21 @@ const logout = () => {
   color: var(--sidebar-text);
   cursor: pointer;
   text-decoration: none;
-  transition: color var(--transition), background var(--transition);
+  outline: none;
+  transition: color var(--transition), background var(--transition), transform var(--transition);
 }
 
 .nav-collapsed-group:hover {
   color: var(--sidebar-text-hover);
   background: var(--sidebar-hover);
+}
+
+.nav-collapsed-group:active {
+  transform: scale(0.96);
+}
+
+.nav-collapsed-group:focus-visible {
+  box-shadow: 0 0 0 2px var(--sidebar-indicator);
 }
 
 .nav-collapsed-group.active {
@@ -598,33 +654,93 @@ const logout = () => {
   border-top: 1px solid var(--sidebar-border);
 }
 
+.user-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* el-dropdown 渲染外层 span，需穿透 scoped 让其撑满剩余空间 */
+.user-area :deep(.el-dropdown) {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+/* 主题按钮：固定尺寸的纯图标按钮 */
+.user-area .theme-toggle-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+
+.user-area .theme-toggle-btn :deep(.theme-toggle) {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+
+.user-area .theme-toggle-btn :deep(.theme-toggle-label) {
+  display: none;
+}
+
+/* 折叠态：垂直排列 */
+.sidebar.collapsed .user-area {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar.collapsed .user-area :deep(.el-dropdown) {
+  flex: none;
+  width: 100%;
+  justify-content: center;
+}
+
 .user-chip {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 7px 9px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition);
+  outline: none;
+  transition: background var(--transition), transform var(--transition);
 }
 
 .user-chip:hover {
   background: var(--sidebar-hover);
 }
 
+.user-chip:hover .user-avatar {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.28), 0 0 8px rgba(96, 165, 250, 0.3);
+}
+
+.user-chip:active {
+  transform: scale(0.98);
+}
+
+.user-chip:focus-visible {
+  box-shadow: 0 0 0 2px var(--sidebar-indicator);
+}
+
 .user-avatar {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: linear-gradient(135deg, #60A5FA, #2563EB);
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
   color: #FFFFFF;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: box-shadow var(--transition);
 }
 
 .user-name {
@@ -633,6 +749,7 @@ const logout = () => {
   color: var(--sidebar-text-hover);
   font-size: 13px;
   font-weight: 500;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -643,19 +760,16 @@ const logout = () => {
   width: 13px;
   height: 13px;
   color: var(--sidebar-group);
+  transition: transform var(--transition), color var(--transition);
+}
+
+.user-chip:hover .user-chevron {
+  color: var(--sidebar-text-hover);
 }
 
 .sidebar.collapsed .user-chip {
   justify-content: center;
   padding: 5px;
-}
-
-/* --- 主题切换浮动按钮 --- */
-.theme-fab {
-  position: absolute;
-  top: 16px;
-  right: 24px;
-  z-index: 50;
 }
 
 /* --- 侧边栏收起/展开按钮 --- */
@@ -675,19 +789,29 @@ const logout = () => {
   color: var(--slate);
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
+  outline: none;
+  transition: color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .sidebar-toggle svg {
   width: 14px;
   height: 14px;
-  transition: transform 0.2s ease;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-toggle:hover {
   color: var(--accent);
   border-color: var(--accent);
   box-shadow: var(--shadow-md);
+  transform: scale(1.08);
+}
+
+.sidebar-toggle:focus-visible {
+  box-shadow: var(--shadow-md), 0 0 0 2px var(--accent);
+}
+
+.sidebar-toggle:active {
+  transform: scale(0.95);
 }
 
 .sidebar.collapsed .sidebar-toggle svg {
@@ -743,16 +867,76 @@ const logout = () => {
   font-size: 13px;
   white-space: nowrap;
   text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .nav-flyout-item:hover {
   background: var(--accent-soft);
   color: var(--accent);
+  transform: translateX(2px);
 }
 
 .nav-flyout-item.active {
   background: var(--accent);
   color: #fff;
+}
+
+/* 用户头像下拉菜单：传送至 body，脱离 scoped */
+.el-dropdown-menu {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: 1px solid var(--mist) !important;
+  padding: 6px !important;
+  min-width: 120px;
+}
+
+.el-dropdown-menu .el-dropdown-menu__item {
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
+  margin: 2px 0;
+  text-align: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.el-dropdown-menu .el-dropdown-menu__item:hover {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.el-dropdown-menu .el-dropdown-menu__item--divided {
+  border-top: 1px solid var(--mist);
+  margin-top: 6px;
+  padding-top: 8px;
+}
+
+.el-dropdown-menu .el-dropdown-menu__item--divided:before {
+  height: 0;
+}
+
+/* 退出登录项：红色强调 */
+.el-dropdown-menu .el-dropdown-menu__item:last-of-type:hover {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+}
+
+/* 尊重用户动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-brand,
+  .nav-item-inner,
+  .nav-item-inner::before,
+  .nav-collapsed-group,
+  .nav-section-chevron,
+  .nav-section-collapse-enter-active,
+  .nav-section-collapse-leave-active,
+  .user-chip,
+  .sidebar-toggle,
+  .sidebar-toggle svg,
+  .nav-flyout-item {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 </style>

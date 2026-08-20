@@ -71,7 +71,7 @@ async def _get_extract_token() -> str:
     resp.raise_for_status()
     data = resp.json()
     _cached_token = data["access_token"]
-    _token_expires = time.time() + data.get("expiresIn", 86400000) / 1000
+    _token_expires = time.time() + data.get("expiresIn", 259200000) / 1000
     return _cached_token
 
 

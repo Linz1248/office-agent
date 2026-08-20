@@ -1,0 +1,15 @@
+# 记忆图谱模块（memory_graph）运行依赖。
+# 安装到运行 Agent Service 的 conda 环境（默认 office-agent）：
+#   /opt/conda/envs/office-agent/bin/pip install -r memory_graph/requirements.txt
+#
+# jinja2 / json_repair / pydantic-settings 已随 agentscope/office-agent 基础栈存在。
+# 必需（默认无 Docker 形态）：
+neo4j>=5.14
+SQLAlchemy[asyncio]>=2.0.0
+aiosqlite>=0.19.0
+tiktoken>=0.7.0
+# 可选：MEMORY_GRAPH_AUDIT_BACKEND=postgres 时需要
+asyncpg>=0.29.0
+# 可选：MEMORY_GRAPH_CELERY_ENABLED=true 时需要（需 Redis broker）
+redis>=5.0.0
+celery>=5.3.0
