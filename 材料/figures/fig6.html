@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="700" viewBox="0 0 1240 700" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+  </defs>
+
+  <text x="620" y="44" text-anchor="middle" font-size="32" font-weight="700" fill="#1e3a5f">三级渐进式文本差异比对算法流程</text>
+
+  <!-- 阶段1 -->
+  <rect x="180" y="110" width="600" height="70" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="480" y="150" text-anchor="middle" font-size="19" font-weight="700" fill="#1e3a8a">① 全角/半角规范化</text>
+  <text x="820" y="150" text-anchor="middle" font-size="14.5" fill="#0066cc">预处理编码形式</text>
+
+  <!-- 阶段2 -->
+  <rect x="180" y="240" width="600" height="70" rx="12" fill="#e0f2fe" stroke="#0284c7" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="480" y="272" text-anchor="middle" font-size="19" font-weight="700" fill="#075985">② 第一级 · 空白归一化</text>
+  <text x="480" y="297" text-anchor="middle" font-size="14" fill="#0369a1">归一化坐标 ↔ 原始坐标 双向映射</text>
+
+  <!-- 阶段3 -->
+  <rect x="180" y="370" width="600" height="70" rx="12" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="480" y="402" text-anchor="middle" font-size="19" font-weight="700" fill="#134e4a">③ 第二级 · 词元级序列对齐</text>
+  <text x="480" y="427" text-anchor="middle" font-size="14" fill="#0f766e">输出：保留 · 新增 · 删除 · 修改</text>
+
+  <!-- 阶段4 -->
+  <rect x="180" y="500" width="600" height="70" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="480" y="532" text-anchor="middle" font-size="19" font-weight="700" fill="#4c1d95">④ 第三级 · 字符级编辑距离精判</text>
+  <text x="480" y="557" text-anchor="middle" font-size="14" fill="#6d28d9">区分：内容替换 / 局部字词修改</text>
+
+  <!-- 内部箭头 -->
+  <line x1="480" y1="180" x2="480" y2="236" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="480" y1="310" x2="480" y2="366" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="480" y1="440" x2="480" y2="496" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 右侧过滤标注 -->
+  <rect x="860" y="118" width="330" height="46" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="1025" y="146" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">过滤：编码差异（全角/半角）</text>
+
+  <rect x="860" y="252" width="330" height="46" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="1025" y="280" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">过滤：空白差异（空格 / 换行）</text>
+
+  <rect x="860" y="382" width="330" height="46" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <text x="1025" y="410" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">过滤：字符级噪声（聚合为词元级信号）</text>
+
+  <rect x="860" y="512" width="330" height="46" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="1025" y="540" text-anchor="middle" font-size="15" font-weight="700" fill="#15803d">输出：精确差异描述</text>
+
+  <!-- 连接虚线 -->
+  <line x1="780" y1="145" x2="856" y2="145" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <line x1="780" y1="275" x2="856" y2="275" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <line x1="780" y1="405" x2="856" y2="405" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+  <line x1="780" y1="535" x2="856" y2="535" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 5"/>
+
+  <!-- 底部说明 -->
+  <rect x="180" y="612" width="1010" height="52" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="685" y="644" text-anchor="middle" font-size="16" fill="#475569">由粗到细、层层递进 —— 在保证差异召回率的同时，将误报率控制在极低水平</text>
+</svg>
+</body>
+</html>

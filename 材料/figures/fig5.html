@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="620" viewBox="0 0 1240 620" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+  </defs>
+
+  <text x="620" y="44" text-anchor="middle" font-size="32" font-weight="700" fill="#1e3a5f">双次识别智能合并算法流程</text>
+
+  <!-- 图例 -->
+  <rect x="820" y="60" width="150" height="30" rx="7" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="895" y="81" text-anchor="middle" font-size="14" fill="#15803d">补回有效段落</text>
+  <rect x="980" y="60" width="150" height="30" rx="7" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="1055" y="81" text-anchor="middle" font-size="14" fill="#b91c1c">过滤水印段落</text>
+
+  <!-- 列1：输入与预处理 -->
+  <rect x="60" y="110" width="210" height="64" rx="11" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <text x="165" y="147" text-anchor="middle" font-size="17" font-weight="700" fill="#1e3a8a">原始文档</text>
+
+  <rect x="60" y="230" width="210" height="64" rx="11" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <text x="165" y="267" text-anchor="middle" font-size="16.5" font-weight="700" fill="#1e3a8a">去水印预处理</text>
+
+  <rect x="60" y="350" width="210" height="64" rx="11" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <text x="165" y="387" text-anchor="middle" font-size="17" font-weight="700" fill="#1e3a8a">清洁文档</text>
+
+  <!-- 列2：双次识别 -->
+  <rect x="470" y="110" width="210" height="64" rx="11" fill="#f0fdfa" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="575" y="147" text-anchor="middle" font-size="16.5" font-weight="700" fill="#134e4a">清洁文档识别</text>
+
+  <rect x="470" y="350" width="210" height="64" rx="11" fill="#f0fdfa" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="575" y="387" text-anchor="middle" font-size="16.5" font-weight="700" fill="#134e4a">原始文档识别</text>
+
+  <!-- 列3：对齐与合并 -->
+  <rect x="880" y="130" width="300" height="64" rx="11" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <text x="1030" y="167" text-anchor="middle" font-size="16" font-weight="700" fill="#4c1d95">段落粒度序列对齐（C ↔ O）</text>
+
+  <rect x="880" y="250" width="300" height="64" rx="11" fill="#fffbeb" stroke="#d97706" stroke-width="2" filter="url(#sh)"/>
+  <text x="1030" y="287" text-anchor="middle" font-size="16" font-weight="700" fill="#92400e">以清洁文本为基准 · 合并过滤</text>
+
+  <rect x="880" y="372" width="142" height="72" rx="11" fill="#dcfce7" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="951" y="404" text-anchor="middle" font-size="14.5" font-weight="700" fill="#15803d">被补回的有效段落</text>
+  <text x="951" y="428" text-anchor="middle" font-size="13.5" fill="#15803d">→ 并入结果</text>
+
+  <rect x="1038" y="372" width="142" height="72" rx="11" fill="#fee2e2" stroke="#dc2626" stroke-width="2" filter="url(#sh)"/>
+  <text x="1109" y="404" text-anchor="middle" font-size="14.5" font-weight="700" fill="#b91c1c">被过滤的水印段落</text>
+  <text x="1109" y="428" text-anchor="middle" font-size="13.5" fill="#b91c1c">→ 丢弃</text>
+
+  <rect x="880" y="478" width="300" height="60" rx="13" fill="#1e3a5f"/>
+  <text x="1030" y="516" text-anchor="middle" font-size="16.5" font-weight="700" fill="#fff">合并结果 · 消除干扰 + 保留信息</text>
+
+  <!-- 列1内部箭头 -->
+  <line x1="165" y1="174" x2="165" y2="226" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="165" y1="294" x2="165" y2="346" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 原始文档 → 原始文档识别（下路） -->
+  <path d="M270 142 H390 V 382 H466" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <!-- 清洁文档 → 清洁文档识别（上路） -->
+  <path d="M270 382 H360 V 142 H466" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 双次识别 → 序列对齐 -->
+  <path d="M680 142 H730 V 152 H876" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="743" y="133" font-size="13.5" fill="#0f766e" font-weight="700">C</text>
+  <path d="M680 382 H790 V 176 H876" fill="none" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="803" y="395" font-size="13.5" fill="#0f766e" font-weight="700">O</text>
+
+  <!-- 序列对齐 → 合并过滤 -->
+  <line x1="1030" y1="194" x2="1030" y2="246" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="1046" y="226" font-size="13" fill="#64748b">f: O → C ∪ {null}</text>
+
+  <!-- 合并过滤 → 两个结果 -->
+  <line x1="951" y1="314" x2="951" y2="368" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="1109" y1="314" x2="1109" y2="368" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 结果 → 合并结果 -->
+  <line x1="951" y1="444" x2="951" y2="474" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="1109" y1="444" x2="1109" y2="474" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arr)"/>
+</svg>
+</body>
+</html>

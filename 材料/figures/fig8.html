@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="720" viewBox="0 0 1240 720" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <marker id="arrUp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+  </defs>
+
+  <text x="330" y="46" text-anchor="middle" font-size="24" font-weight="700" fill="#134e4a">记忆萃取流水线</text>
+  <text x="930" y="46" text-anchor="middle" font-size="24" font-weight="700" fill="#4c1d95">四层溯源图结构</text>
+
+  <!-- 中分线 -->
+  <line x1="660" y1="66" x2="660" y2="690" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- 左：流水线 -->
+  <rect x="60" y="90" width="540" height="52" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="122" text-anchor="middle" font-size="16.5" font-weight="600" fill="#1e3a8a">对话文本</text>
+
+  <rect x="60" y="168" width="540" height="52" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="200" text-anchor="middle" font-size="16.5" font-weight="600" fill="#075985">语义分块</text>
+
+  <rect x="60" y="246" width="540" height="52" rx="10" fill="#f0fdfa" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="278" text-anchor="middle" font-size="16.5" font-weight="600" fill="#134e4a">原子陈述抽取</text>
+
+  <rect x="60" y="324" width="540" height="52" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="356" text-anchor="middle" font-size="16.5" font-weight="600" fill="#4c1d95">三元组萃取（实体—关系—实体）· 附时效/置信度</text>
+
+  <rect x="60" y="402" width="540" height="52" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="434" text-anchor="middle" font-size="16.5" font-weight="600" fill="#92400e">批内去重（规则初筛 + 模型判定）</text>
+
+  <rect x="60" y="480" width="540" height="52" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="512" text-anchor="middle" font-size="16.5" font-weight="600" fill="#9a3412">图谱存量实体融合</text>
+
+  <rect x="60" y="558" width="540" height="52" rx="10" fill="#1e3a5f" filter="url(#sh)"/>
+  <text x="330" y="590" text-anchor="middle" font-size="16.5" font-weight="700" fill="#fff">写入记忆图谱</text>
+
+  <line x1="330" y1="142" x2="330" y2="164" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="330" y1="220" x2="330" y2="242" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="330" y1="298" x2="330" y2="320" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="330" y1="376" x2="330" y2="398" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="330" y1="454" x2="330" y2="476" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="330" y1="532" x2="330" y2="554" stroke="#64748b" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <text x="60" y="646" font-size="14" fill="#64748b">萃取 → 编排 → 巩固 → 检索　全周期 · 全程本地运行</text>
+
+  <!-- 右：溯源图 -->
+  <rect x="760" y="120" width="340" height="58" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="930" y="155" text-anchor="middle" font-size="16.5" font-weight="700" fill="#4c1d95">对话节点</text>
+
+  <rect x="760" y="250" width="340" height="58" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="930" y="285" text-anchor="middle" font-size="16.5" font-weight="700" fill="#4c1d95">文本块节点</text>
+
+  <rect x="760" y="380" width="340" height="58" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="930" y="415" text-anchor="middle" font-size="16.5" font-weight="700" fill="#4c1d95">陈述节点</text>
+
+  <rect x="760" y="510" width="340" height="58" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="930" y="545" text-anchor="middle" font-size="16.5" font-weight="700" fill="#4c1d95">实体 / 事件节点</text>
+
+  <line x1="930" y1="178" x2="930" y2="246" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrUp)"/>
+  <line x1="930" y1="308" x2="930" y2="376" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrUp)"/>
+  <line x1="930" y1="438" x2="930" y2="506" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrUp)"/>
+
+  <text x="952" y="205" font-size="12.5" fill="#7c3aed">1 : N</text>
+  <text x="952" y="335" font-size="12.5" fill="#7c3aed">1 : N</text>
+  <text x="952" y="465" font-size="12.5" fill="#7c3aed">1 : N</text>
+
+  <!-- 右侧溯源箭头 -->
+  <line x1="1160" y1="560" x2="1160" y2="120" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrUp)"/>
+  <text x="1188" y="340" text-anchor="middle" font-size="14.5" font-weight="700" fill="#7c3aed" transform="rotate(90 1188 340)">可回溯至原始对话</text>
+
+  <rect x="760" y="610" width="400" height="56" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="960" y="634" text-anchor="middle" font-size="14" fill="#475569">每条关系挂载来源陈述</text>
+  <text x="960" y="655" text-anchor="middle" font-size="14" fill="#475569">任一记忆可沿链路溯源</text>
+</svg>
+</body>
+</html>

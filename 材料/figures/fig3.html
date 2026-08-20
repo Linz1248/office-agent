@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="760" viewBox="0 0 1240 760" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+  </defs>
+
+  <text x="620" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">系统总体架构 · 四层分层设计</text>
+
+  <!-- 安全边界 -->
+  <rect x="46" y="72" width="1148" height="650" rx="18" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="10 7"/>
+  <rect x="58" y="78" width="200" height="34" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="158" y="101" text-anchor="middle" font-size="16" font-weight="700" fill="#991b1b">企业内网 · 数据零出域</text>
+
+  <!-- 表现层 -->
+  <rect x="130" y="112" width="980" height="86" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <rect x="130" y="112" width="12" height="86" rx="6" fill="#2563eb"/>
+  <text x="168" y="146" font-size="23" font-weight="700" fill="#1e3a8a">表现层　交互界面 + 统一网关</text>
+  <text x="168" y="178" font-size="15" fill="#1d4ed8">对话式交互 · 流式推送 · 统一路由 · 跨域与鉴权</text>
+
+  <!-- 表现层→智能层 -->
+  <line x1="620" y1="198" x2="620" y2="248" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="636" y="212" width="112" height="24" rx="6" fill="#fff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="692" y="229" text-anchor="middle" font-size="12.5" fill="#475569">统一网关路由</text>
+
+  <!-- 智能层 -->
+  <rect x="130" y="252" width="980" height="150" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <rect x="130" y="252" width="12" height="150" rx="6" fill="#7c3aed"/>
+  <text x="168" y="290" font-size="23" font-weight="700" fill="#4c1d95">智能层　ReAct 智能体（平台“大脑”）</text>
+  <text x="168" y="320" font-size="15" fill="#6d28d9">意图理解 · 任务分解 · 多轮推理 · 自动上下文压缩</text>
+  <!-- 三类资产 -->
+  <rect x="168" y="342" width="130" height="44" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="233" y="369" text-anchor="middle" font-size="14.5" font-weight="600" fill="#5b21b6">长期记忆</text>
+  <rect x="312" y="342" width="130" height="44" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="377" y="369" text-anchor="middle" font-size="14.5" font-weight="600" fill="#5b21b6">个人知识库</text>
+  <rect x="456" y="342" width="130" height="44" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="521" y="369" text-anchor="middle" font-size="14.5" font-weight="600" fill="#5b21b6">业务技能</text>
+  <text x="606" y="369" text-anchor="middle" font-size="18" fill="#6d28d9">—— 用户级三类资产</text>
+
+  <!-- 智能层→工具层 -->
+  <line x1="620" y1="402" x2="620" y2="452" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="636" y="416" width="128" height="24" rx="6" fill="#fff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="700" y="433" text-anchor="middle" font-size="12.5" fill="#475569">MCP 协议调用</text>
+
+  <!-- 工具层 -->
+  <rect x="130" y="456" width="980" height="86" rx="14" fill="#f0fdfa" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <rect x="130" y="456" width="12" height="86" rx="6" fill="#0d9488"/>
+  <text x="168" y="490" font-size="23" font-weight="700" fill="#134e4a">工具层　MCP 标准工具网关（平台“手”）</text>
+  <text x="168" y="522" font-size="15" fill="#0f766e">能力标准化封装 · 凭证管理 · 结果长度保护 · 认证自动重试</text>
+
+  <!-- 工具层→能力层 -->
+  <line x1="620" y1="542" x2="620" y2="592" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="636" y="556" width="112" height="24" rx="6" fill="#fff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="692" y="573" text-anchor="middle" font-size="12.5" fill="#475569">服务接口调用</text>
+
+  <!-- 能力层 -->
+  <rect x="130" y="596" width="980" height="104" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <rect x="130" y="596" width="12" height="104" rx="6" fill="#16a34a"/>
+  <text x="168" y="626" font-size="23" font-weight="700" fill="#14532d">能力层　三大垂直能力服务 + 本地大模型推理引擎</text>
+  <rect x="168" y="646" width="150" height="40" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="243" y="671" text-anchor="middle" font-size="14" font-weight="600" fill="#15803d">文档智能抽取</text>
+  <rect x="330" y="646" width="130" height="40" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="395" y="671" text-anchor="middle" font-size="14" font-weight="600" fill="#15803d">文档比对</text>
+  <rect x="472" y="646" width="130" height="40" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="537" y="671" text-anchor="middle" font-size="14" font-weight="600" fill="#15803d">多模态检索</text>
+  <rect x="614" y="646" width="478" height="40" rx="8" fill="#bbf7d0" stroke="#15803d" stroke-width="1.5"/>
+  <text x="853" y="671" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">本地大模型推理引擎（内网隔离 · 数据零出域）</text>
+</svg>
+</body>
+</html>

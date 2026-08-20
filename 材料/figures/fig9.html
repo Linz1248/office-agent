@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="720" viewBox="0 0 1240 720" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <text x="620" y="42" text-anchor="middle" font-size="31" font-weight="700" fill="#1e3a5f">纵深防御安全体系</text>
+
+  <!-- 同心圆 -->
+  <circle cx="620" cy="330" r="250" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5" filter="url(#sh)"/>
+  <circle cx="620" cy="330" r="192" fill="#dbeafe" stroke="#2563eb" stroke-width="2.5"/>
+  <circle cx="620" cy="330" r="134" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <circle cx="620" cy="330" r="78" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"/>
+  <circle cx="620" cy="330" r="40" fill="#1e3a5f" stroke="#1e3a5f"/>
+
+  <!-- 环标题 -->
+  <text x="620" y="96" text-anchor="middle" font-size="20" font-weight="700" fill="#14532d">数据边界</text>
+  <text x="620" y="152" text-anchor="middle" font-size="17" font-weight="700" fill="#1e3a8a">访问控制</text>
+  <text x="620" y="209" text-anchor="middle" font-size="15" font-weight="700" fill="#92400e">执行治理</text>
+  <text x="620" y="262" text-anchor="middle" font-size="14" font-weight="700" fill="#b91c1c">审计追溯</text>
+
+  <!-- 内核 -->
+  <text x="620" y="323" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">本地推理引擎</text>
+  <text x="620" y="341" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">交互层专项加固</text>
+
+  <!-- 由外向内说明 -->
+  <line x1="200" y1="330" x2="310" y2="330" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrIn)"/>
+  <text x="150" y="300" text-anchor="middle" font-size="14" fill="#64748b">四项核心关切</text>
+
+  <!-- 图例/明细 -->
+  <rect x="130" y="556" width="480" height="60" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <circle cx="160" cy="586" r="9" fill="#16a34a"/>
+  <text x="180" y="581" font-size="16" font-weight="700" fill="#14532d">① 数据边界</text>
+  <text x="180" y="603" font-size="13.5" fill="#15803d">全栈本地部署 · 敏感链路强制本地推理</text>
+
+  <rect x="630" y="556" width="480" height="60" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <circle cx="660" cy="586" r="9" fill="#2563eb"/>
+  <text x="680" y="581" font-size="16" font-weight="700" fill="#1e3a8a">② 访问控制</text>
+  <text x="680" y="603" font-size="13.5" fill="#1d4ed8">全链路鉴权 · 最小权限 · 属主级资产隔离</text>
+
+  <rect x="130" y="628" width="480" height="60" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+  <circle cx="160" cy="658" r="9" fill="#d97706"/>
+  <text x="180" y="653" font-size="16" font-weight="700" fill="#92400e">③ 执行治理</text>
+  <text x="180" y="675" font-size="13.5" fill="#b45309">工具白名单 · 结果长度保护 · 输入消毒</text>
+
+  <rect x="630" y="628" width="480" height="60" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+  <circle cx="660" cy="658" r="9" fill="#dc2626"/>
+  <text x="680" y="653" font-size="16" font-weight="700" fill="#b91c1c">④ 审计追溯</text>
+  <text x="680" y="675" font-size="13.5" fill="#dc2626">会话 / 工具调用 / 操作日志全量留痕</text>
+
+  <defs>
+    <marker id="arrIn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+  </defs>
+</svg>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1240" height="690" viewBox="0 0 1240 690" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+  </defs>
+
+  <text x="620" y="38" text-anchor="middle" font-size="32" font-weight="700" fill="#1e3a5f">典型任务端到端数据流</text>
+
+  <!-- 泳道背景 -->
+  <rect x="40" y="70" width="278" height="540" rx="8" fill="#f1f5f9"/>
+  <rect x="334" y="70" width="278" height="540" rx="8" fill="#f5f3ff"/>
+  <rect x="628" y="70" width="278" height="540" rx="8" fill="#f0fdfa"/>
+  <rect x="922" y="70" width="278" height="540" rx="8" fill="#f0fdf4"/>
+
+  <!-- 泳道头 -->
+  <path d="M40 78 q0 -8 8 -8 h262 q8 0 8 8 v34 h-278 z" fill="#64748b"/>
+  <text x="179" y="94" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">用户 / 网关</text>
+  <path d="M334 78 q0 -8 8 -8 h262 q8 0 8 8 v34 h-278 z" fill="#7c3aed"/>
+  <text x="473" y="94" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">智能体</text>
+  <path d="M628 78 q0 -8 8 -8 h262 q8 0 8 8 v34 h-278 z" fill="#0d9488"/>
+  <text x="767" y="94" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">工具层（MCP）</text>
+  <path d="M922 78 q0 -8 8 -8 h262 q8 0 8 8 v34 h-278 z" fill="#16a34a"/>
+  <text x="1061" y="94" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">能力层</text>
+
+  <!-- ① -->
+  <rect x="56" y="132" width="246" height="112" rx="11" fill="#fff" stroke="#64748b" stroke-width="2" filter="url(#sh)"/>
+  <text x="179" y="172" text-anchor="middle" font-size="15.5" font-weight="700" fill="#334155">① 用户请求 · 统一网关路由</text>
+  <text x="179" y="204" text-anchor="middle" font-size="14" fill="#64748b">（身份认证 + 会话恢复）</text>
+
+  <!-- ② -->
+  <rect x="350" y="132" width="246" height="112" rx="11" fill="#fff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <text x="473" y="166" text-anchor="middle" font-size="15.5" font-weight="700" fill="#4c1d95">② ReAct 循环推理</text>
+  <text x="473" y="192" text-anchor="middle" font-size="14" fill="#6d28d9">语义理解 → 任务分解</text>
+  <text x="473" y="218" text-anchor="middle" font-size="14" fill="#6d28d9">（字段抽取 + 版本比对）</text>
+
+  <!-- ③ -->
+  <rect x="644" y="132" width="246" height="112" rx="11" fill="#fff" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="767" y="172" text-anchor="middle" font-size="15.5" font-weight="700" fill="#134e4a">③ 经 MCP 协议调用</text>
+  <text x="767" y="204" text-anchor="middle" font-size="14.5" fill="#0f766e">「文档抽取」工具</text>
+
+  <!-- ④ -->
+  <rect x="938" y="132" width="246" height="112" rx="11" fill="#fff" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="1061" y="172" text-anchor="middle" font-size="15.5" font-weight="700" fill="#14532d">④ 文档抽取能力执行</text>
+  <text x="1061" y="204" text-anchor="middle" font-size="14.5" fill="#15803d">→ 返回 签订日期 2024-03-15</text>
+
+  <!-- ⑤ -->
+  <rect x="644" y="322" width="246" height="112" rx="11" fill="#fff" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="767" y="362" text-anchor="middle" font-size="15.5" font-weight="700" fill="#134e4a">⑤ 经 MCP 协议调用</text>
+  <text x="767" y="394" text-anchor="middle" font-size="14.5" fill="#0f766e">「文档比对」工具</text>
+
+  <!-- ⑥ -->
+  <rect x="938" y="322" width="246" height="112" rx="11" fill="#fff" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="1061" y="362" text-anchor="middle" font-size="15.5" font-weight="700" fill="#14532d">⑥ 文档比对能力执行</text>
+  <text x="1061" y="394" text-anchor="middle" font-size="14.5" fill="#15803d">三级渐进式比对 + 差异标注</text>
+
+  <!-- ⑦ -->
+  <rect x="350" y="466" width="246" height="112" rx="11" fill="#fff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <text x="473" y="506" text-anchor="middle" font-size="15.5" font-weight="700" fill="#4c1d95">⑦ 智能体整合两步结果</text>
+  <text x="473" y="538" text-anchor="middle" font-size="14.5" fill="#6d28d9">→ 流式返回 · 呈现结构化回复</text>
+
+  <!-- 箭头 -->
+  <line x1="302" y1="188" x2="346" y2="188" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="596" y1="188" x2="640" y2="188" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="890" y1="188" x2="934" y2="188" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M938 244 V 284 H 767 V 318" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="890" y1="378" x2="934" y2="378" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M938 434 V 500 H 473 V 462" fill="none" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="350" y1="522" x2="306" y2="522" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+  <text x="328" y="555" text-anchor="middle" font-size="13" fill="#64748b">呈现给用户</text>
+
+  <!-- 图例 -->
+  <rect x="40" y="632" width="1160" height="44" rx="9" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="620" y="659" text-anchor="middle" font-size="14.5" fill="#475569">数据载体：用户指令 · 工具调用报文 · 结构化结果 · 流式增量　——　“一句自然语言 → 两次标准工具调用 → 一份整合结果”</text>
+</svg>
+</body>
+</html>
