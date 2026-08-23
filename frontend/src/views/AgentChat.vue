@@ -247,7 +247,7 @@
                 class="plus-btn"
                 :class="{ active: plusMenuVisible }"
                 :disabled="isWaiting"
-                title="功能菜单 · 上传文件 / 知识库检索"
+                title="功能菜单 · 上传文件 / 知识库检索 / 会议检索"
                 type="button"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -255,7 +255,7 @@
                   <line x1="12" y1="5" x2="12" y2="19"/>
                   <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                <span v-if="useKB" class="plus-btn-badge" title="知识库检索已开启"></span>
+                <span v-if="useKB || useMeetingKB" class="plus-btn-badge" title="检索开关已开启"></span>
               </button>
             </template>
             <div class="plus-menu">
@@ -285,6 +285,22 @@
                   <span class="plus-menu-title">知识库检索</span>
                 </span>
                 <span class="kb-mini-switch" :class="{ on: useKB }"><span class="kb-mini-thumb"></span></span>
+              </button>
+              <button
+                class="plus-menu-item kb-menu-item"
+                :class="{ on: useMeetingKB }"
+                type="button"
+                @click="useMeetingKB = !useMeetingKB"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m16 13 5.2-3.1a2 2 0 0 1 3 1.7v6.8a2 2 0 0 1-3 1.7L16 17"/>
+                  <rect x="2" y="6" width="14" height="12" rx="2"/>
+                </svg>
+                <span class="plus-menu-text">
+                  <span class="plus-menu-title">会议检索</span>
+                </span>
+                <span class="kb-mini-switch" :class="{ on: useMeetingKB }"><span class="kb-mini-thumb"></span></span>
               </button>
             </div>
           </el-popover>
@@ -354,6 +370,10 @@ const fileInput = ref(null)
 const useKB = ref(localStorage.getItem('kb_retrieval_enabled') !== 'false')
 const onKBToggle = (v) => localStorage.setItem('kb_retrieval_enabled', v ? 'true' : 'false')
 watch(useKB, onKBToggle)
+// 会议检索开关：开启后智能体可检索我的会议知识库（独立于个人知识库）；默认关闭。
+const useMeetingKB = ref(localStorage.getItem('meeting_kb_enabled') === 'true')
+const onMeetingKBToggle = (v) => localStorage.setItem('meeting_kb_enabled', v ? 'true' : 'false')
+watch(useMeetingKB, onMeetingKBToggle)
 // 「+」功能菜单（上传文件 / 知识库检索）展开状态
 const plusMenuVisible = ref(false)
 
@@ -644,6 +664,7 @@ const sendMessage = async () => {
         message: text,
         session_id: currentSessionId.value,
         use_kb: useKB.value,
+        use_meeting_kb: useMeetingKB.value,
         attachments: readyAttachments.length
           ? readyAttachments.map(f => ({
               original_name: f.original_name,

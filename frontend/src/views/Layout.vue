@@ -117,6 +117,35 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          <!-- 会议通知铃铛（应用内通知，60s 轮询未读数） -->
+          <el-popover placement="top-end" :width="344" trigger="click" popper-class="notif-popper" @show="loadNotifications">
+            <template #reference>
+              <button class="notif-bell" title="会议通知" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.bell"></svg>
+                <span v-if="unreadCount" class="notif-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+              </button>
+            </template>
+            <div class="notif-panel">
+              <div class="notif-head">
+                <span>会议通知</span>
+                <button v-if="notifications.some((n) => !n.read)" class="notif-markall" type="button" @click="markAllRead">全部已读</button>
+              </div>
+              <div v-if="notifLoading && !notifications.length" class="notif-empty">加载中…</div>
+              <div v-else-if="!notifications.length" class="notif-empty">暂无通知</div>
+              <div v-else class="notif-list">
+                <div
+                  v-for="n in notifications" :key="n.notif_id"
+                  class="notif-item" :class="{ unread: !n.read }"
+                  @click="clickNotif(n)"
+                >
+                  <div class="notif-title">{{ n.title }}</div>
+                  <div class="notif-content">{{ n.content }}</div>
+                  <div class="notif-time">{{ formatNotifTime(n.created_at) }}</div>
+                </div>
+              </div>
+              <router-link to="/meetings" class="notif-foot">前往我的会议 →</router-link>
+            </div>
+          </el-popover>
           <ThemeToggle :collapsed="isCollapsed" class="theme-toggle-btn" />
         </div>
       </div>
@@ -157,7 +186,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import router from '@/router'
@@ -165,6 +194,7 @@ import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 import BrandLogo from '@/components/BrandLogo.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import meetingApi from '@/api/meetings'
 
 const store = useUserStore()
 const route = useRoute()
@@ -210,6 +240,8 @@ const ICONS = {
   files: '<path d="M15 2H9a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z"/><path d="M7 8H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 21"/>',
   audio: '<path d="M2 10v4"/><path d="M6 6v12"/><path d="M10 4v16"/><path d="M14 8v8"/><path d="M18 5v14"/><path d="M22 9v6"/>',
+  video: '<path d="m16 13 5.2-3.1a2 2 0 0 1 3 1.7v6.8a2 2 0 0 1-3 1.7L16 17"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   blocks: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
 }
 
@@ -241,6 +273,12 @@ const menuGroups = [
     label: '知识库', icon: ICONS.book,
     items: [
       { path: '/knowledge_base', label: '个人知识库', icon: ICONS.book },
+    ],
+  },
+  {
+    label: '我的会议', icon: ICONS.video,
+    items: [
+      { path: '/meetings', label: '会议与待办', icon: ICONS.video },
     ],
   },
   {
@@ -319,6 +357,51 @@ const logout = () => {
   store.clearLoginInfo()
   router.push('/login')
 }
+
+// ── 会议通知铃铛（应用内通知，60s 轮询未读数） ──
+const notifications = ref([])
+const unreadCount = ref(0)
+const notifLoading = ref(false)
+let notifTimer = null
+
+const fetchUnreadCount = async () => {
+  try {
+    const res = await meetingApi.listNotifications(true)
+    unreadCount.value = (res.data.notifications || []).length
+  } catch (e) {
+    if (e?.response?.status !== 401) unreadCount.value = 0
+  }
+}
+
+const loadNotifications = async () => {
+  notifLoading.value = true
+  try {
+    const res = await meetingApi.listNotifications()
+    notifications.value = res.data.notifications || []
+  } catch { /* 静默 */ } finally { notifLoading.value = false }
+}
+
+const markAllRead = async () => {
+  try {
+    await meetingApi.markNotificationsRead()
+    notifications.value = notifications.value.map((n) => ({ ...n, read: true }))
+    unreadCount.value = 0
+  } catch { /* 静默 */ }
+}
+
+const clickNotif = () => {
+  router.push('/meetings')
+}
+
+const formatNotifTime = (ms) => ms
+  ? new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  : ''
+
+onMounted(() => {
+  fetchUnreadCount()
+  notifTimer = setInterval(fetchUnreadCount, 60000)
+})
+onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 </script>
 
 <style scoped>
@@ -676,6 +759,42 @@ const logout = () => {
   justify-content: center;
 }
 
+/* 会议通知铃铛 */
+.notif-bell {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+.notif-bell svg { width: 19px; height: 19px; }
+.notif-bell:hover { color: var(--sidebar-text-hover); background: var(--sidebar-hover); }
+.notif-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px var(--sidebar-bg);
+}
+
 .user-area .theme-toggle-btn :deep(.theme-toggle) {
   width: 36px;
   height: 36px;
@@ -882,6 +1001,90 @@ const logout = () => {
 }
 
 /* 用户头像下拉菜单：传送至 body，脱离 scoped */
+/* 会议通知弹出面板：传送至 body，脱离 scoped */
+.notif-popper.el-popover.el-pure-popper {
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+.notif-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+}
+.notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.notif-markall {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+}
+.notif-markall:hover { text-decoration: underline; }
+.notif-list { overflow-y: auto; padding: 0 8px 8px; }
+.notif-item {
+  padding: 10px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.notif-item:hover { background: var(--mist-light); }
+.notif-item.unread { background: var(--accent-soft); }
+.notif-item.unread .notif-title::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.notif-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notif-content {
+  font-size: 12px;
+  color: var(--slate);
+  line-height: 1.6;
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+}
+.notif-time { font-size: 11px; color: var(--slate-light); margin-top: 4px; }
+.notif-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--slate);
+}
+.notif-foot {
+  display: block;
+  padding: 10px 16px;
+  border-top: 1px solid var(--mist);
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  text-align: center;
+}
+.notif-foot:hover { text-decoration: underline; }
+
 .el-dropdown-menu {
   border-radius: var(--radius-md) !important;
   box-shadow: var(--shadow-lg) !important;

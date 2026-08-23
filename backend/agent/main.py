@@ -112,6 +112,7 @@ from config import (
 from llm_config import (
     get_model_and_formatter,
     get_memory_graph_chat_model,
+    get_meeting_model,
     get_memory_model,
 )
 import cleanup  # 定时清理（上传图片/过期会话/工作区，不含 memory）
@@ -119,6 +120,7 @@ import skill as skill_module  # Skill 系统（Markdown 指令集 + 内网共享
 from ask_user import AskUser  # human-in-loop 外部工具（检索前追问补全信息）
 import kb  # 个人知识库 RAG（嵌入/向量库/检索；未就绪时优雅降级）
 import memory_graph  # 图式长期记忆（Neo4j 记忆图谱；未就绪时优雅降级）
+import meetings  # 飞书会议（自动接收/子 agent 分析/待办提醒/会议知识库）
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -157,6 +159,13 @@ Skill 系统（技能指令）：
 - 当用户的请求匹配某个 skill 的描述时，调用 Skill 查看器工具读取该 skill 的完整指令，然后按指令使用已有工具执行操作。
 - Skill 不是工具——不能直接"调用"一个 skill，而是先读取其指令再按步骤执行。
 - 用户可通过「Skill 市场」页面创建、管理、共享自己的 skill，也可以安装他人公开的 skill。
+
+飞书会议（子 agent 委派）：
+- 用户配置飞书账号后，系统自动接收其已结束会议的妙记/智能纪要，无需用户上传会议数据。
+- list_my_meetings：列出用户已接收的飞书会议（主题/时间/分析状态）。用户问「我最近有哪些会」时调用。
+- process_meeting：把一场会议委派给「会议分析师」子智能体处理，收集其返回的摘要、要点与待办（已区分哪些属于用户本人），再整理汇报给用户。meeting_id 省略时自动处理最近一场未分析的会议。用户说「总结一下我的会议」「提取会议待办」时调用。
+- search_meeting_knowledge：在用户的会议知识库（独立于个人文档知识库）中语义检索会议内容。该工具由用户在对话框「+」菜单的「会议检索」开关控制：开关关闭时调用会返回「未启用」提示，此时不要重试，直接据已知信息作答并提示用户可开启该开关后再问。
+- 汇报会议待办时，区分「属于你的待办」与「待你确认的待办」（后者需用户到「飞书会议」页手动确认或拒绝）。
 
 任务管理与文件操作：
 - TaskCreate / TaskUpdate / TaskList / TaskGet：创建和跟踪任务计划，适合复杂多步任务
@@ -640,6 +649,20 @@ async def lifespan(app: FastAPI):
         kb.is_ready(),
     )
 
+    # 11.5 初始化飞书会议模块：复用上面的 HTTP 客户端；会议分析子 agent 用
+    #      非流式/低温度模型（结构化输出稳定）。会议知识库（独立 Qdrant 集合）
+    #      在 Ollama 嵌入不可用时优雅降级，其余会议能力不受影响。
+    #      主 agent 委派工具（process_meeting / list_my_meetings / search_meeting_knowledge）
+    #      注册到 basic 组（始终可见，按 contextvar 解析当前用户与「会议检索」开关）。
+    _meeting_model = get_meeting_model()
+    await meetings.init_meetings(_http_client, _meeting_model)
+    await _toolkit.add_tool(meetings.ProcessMeetingTool())
+    await _toolkit.add_tool(meetings.ListMyMeetingsTool())
+    await _toolkit.add_tool(meetings.SearchMeetingKnowledge())
+    logger.info(
+        "飞书会议模块就绪: meeting_kb_ready=%s", meetings.is_kb_ready()
+    )
+
     # 12. 启动定时清理任务（上传图片/过期会话/工作区；不含 memory 长期记忆）
     _cleanup_task = await cleanup.start()
 
@@ -672,6 +695,9 @@ async def lifespan(app: FastAPI):
     # 13. 初始化 Skill 系统（Markdown 指令集 + 内网共享市场）
     await skill_module.init_skills()
 
+    # 14. 启动飞书会议后台任务：定时同步（自动接收已结束会议）+ 待办提醒
+    await meetings.start_background()
+
     logger.info("AI 办公搭子 Agent 初始化完成")
 
     yield
@@ -679,6 +705,9 @@ async def lifespan(app: FastAPI):
     # 关闭定时清理任务
     await cleanup.stop(_cleanup_task)
     _cleanup_task = None
+
+    # 关闭飞书会议模块（后台任务/向量库/元数据库）
+    await meetings.close_meetings()
 
     # 关闭 Skill 系统
     await skill_module.close_skills()
@@ -730,6 +759,10 @@ app.add_middleware(
 memory_graph.set_auth_dependency(verify_token)
 app.include_router(memory_graph.router)
 
+# 飞书会议路由（/meetings/*，经网关 /agent/meetings/* 暴露）；注入鉴权依赖
+meetings.set_auth_dependency(verify_token)
+app.include_router(meetings.router)
+
 
 class ChatAttachment(BaseModel):
     """用户上传文件的元信息，用于告知 Agent 可用的文件名/路径。"""
@@ -745,6 +778,7 @@ class ChatRequest(BaseModel):
     session_id: str
     attachments: list[ChatAttachment] | None = None
     use_kb: bool = True  # 是否启用知识库检索（RAG）；False 时 search_knowledge 被权限拒绝
+    use_meeting_kb: bool = False  # 是否启用会议知识库检索；False 时 search_meeting_knowledge 不返回会议数据
 
 
 class StopRequest(BaseModel):
@@ -767,6 +801,7 @@ async def health():
             and _http_client is not None
         ),
         "kb_ready": kb.is_ready(),
+        "meeting_kb_ready": meetings.is_kb_ready(),
     }
 
 
@@ -1792,6 +1827,8 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     # 解析属主、决定是否放行；asyncio.create_task 拷贝上下文，回复任务能继承此值）。
     # 关闭检索时 check_permissions 返回 DENY，工具不返回任何知识库内容。
     kb.set_kb_context(user_id, req.use_kb)
+    # 飞书会议模块同样按请求解析当前用户与「会议检索」开关
+    meetings.set_meeting_context(user_id, req.use_meeting_kb)
     # Skill 系统同样通过 contextvar 按请求解析当前用户
     skill_module.set_skill_context(user_id)
     # 图式长期记忆同样按请求解析当前用户（memory_search 工具 / 写回据此隔离）

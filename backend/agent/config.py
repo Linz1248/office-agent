@@ -130,3 +130,55 @@ KB_SCORE_THRESHOLD = float(os.environ.get("KB_SCORE_THRESHOLD", "0.3"))
 # 可公开到内网市场，其他用户安装后获得独立副本（快照拷贝），不受原作者删除影响。
 SKILL_DIR = SERVICE_ROOT / "skills"
 SKILL_DB_PATH = SERVICE_ROOT / "skill.db"
+
+# ── 飞书会议（自动接收 / 子 agent 分析 / 待办提醒）──────────────────
+# 每个用户在「飞书会议」页配置自己的飞书自建应用凭证（App ID/App Secret）
+# 与本人 open_id：应用凭证按用户隔离，且检索按参会人过滤，双重保证只
+# 接收属于自己的会议数据。后台定时轮询已结束会议，自动拉取妙记/智能纪要，
+# 由会议分析子 agent 生成摘要与待办，正文写入独立的会议知识库集合。
+FEISHU_BASE_URL = os.environ.get("FEISHU_BASE_URL", "https://open.feishu.cn")
+
+# 用户授权（user_access_token，OAuth）回调地址：本地/内网部署默认走网关回调，
+# 浏览器授权后自动跳回 /agent/meetings/oauth/callback 完成换 token（无需公网，
+# 因回调由用户浏览器发起而非飞书服务器）。须在飞书应用「安全设置 → 重定向 URL」
+# 登记同一地址；若飞书拒绝 http://localhost，可改用「手动授权码」并在前端粘贴 code。
+FEISHU_OAUTH_REDIRECT_URI = os.environ.get(
+    "FEISHU_OAUTH_REDIRECT_URI",
+    "http://localhost:8080/agent/meetings/oauth/callback",
+)
+
+# 会议模块元数据 SQLite（账号配置 / 会议 / 待办 / 通知）
+MEETING_DB_PATH = SERVICE_ROOT / "meetings.db"
+# 会议知识库向量存储（与个人知识库 kb_qdrant 物理隔离，互不混杂数据）
+MEETING_QDRANT_PATH = SERVICE_ROOT / "meetings_qdrant"
+MEETING_COLLECTION = os.environ.get("MEETING_COLLECTION", "office_meetings")
+# 复用 KB 的 Ollama 嵌入模型配置（保证会议库与个人库嵌入一致可检索）
+MEETING_SEARCH_TOP_K = int(os.environ.get("MEETING_SEARCH_TOP_K", "5"))
+
+# 同步轮询：间隔秒数与回看天数（会议记录 API 支持最近 90 天，回看窗口
+# 用于补齐服务停机期间错过的已结束会议）
+MEETING_SYNC_INTERVAL = float(os.environ.get("MEETING_SYNC_INTERVAL", "300"))
+MEETING_SYNC_LOOKBACK_DAYS = int(os.environ.get("MEETING_SYNC_LOOKBACK_DAYS", "3"))
+# 待办提醒检查间隔（秒）与提前提醒分钟数
+MEETING_REMINDER_INTERVAL = float(os.environ.get("MEETING_REMINDER_INTERVAL", "60"))
+MEETING_REMIND_LEAD_MINUTES = int(os.environ.get("MEETING_REMIND_LEAD_MINUTES", "30"))
+# 会议结束后多久仍无妙记正文即判定为「无纪要」并标记 empty（分钟）。
+# 飞书智能纪要会后约 1 分钟内生成；10~15 分钟仍为空基本意味着该会议未
+# 生成纪要（未开 AI 纪要/录制、无有效发言、或额度用尽）。默认 30 分钟
+# 留足余量，避免对生成稍慢的长会议误判；此前一直显示「待分析」会让人
+# 误以为卡死。设大可更保守，但不宜再用旧的 24h（那样无纪要的会议会
+# 白白停在「待分析」一整天）。
+MEETING_EMPTY_AFTER_MINUTES = int(os.environ.get("MEETING_EMPTY_AFTER_MINUTES", "30"))
+
+# ── 外部通知渠道（可选，用户在设置中按需启用）────────────────────
+# 邮件：全局 SMTP 服务器配置（服务管理员在 .env 配置），用户只填收件地址
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "") or os.environ.get("SMTP_USER", "")
+SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "true").lower() != "false"
+
+# 微信：Server酱（https://sct.ftqq.com）SendKey，用户在设置中自行填入，
+# 推送到个人微信「Server酱」服务号。
+WECHAT_SEND_API = "https://sctapi.ftqq.com"

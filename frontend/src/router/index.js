@@ -71,6 +71,11 @@ const router = createRouter({
           component: () => import('../views/MemoryGraph.vue')
         },
         {
+          path: '/meetings',
+          name: 'Meetings',
+          component: () => import('../views/Meetings.vue')
+        },
+        {
           path: '/skill_market',
           name: 'SkillMarket',
           component: () => import('../views/SkillMarket.vue')

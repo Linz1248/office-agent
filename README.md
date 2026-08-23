@@ -2,6 +2,8 @@
 
 办公智能体平台，包含一个 Vue3 前端、三个 FastAPI 后端微服务（多模态检索、文档抽取、文档比对）、一个 MCP Server、一个 Agent Service，以及一个统一入口的 API 网关（单端口对外）。
 
+内置「飞书会议」能力：用户配置自己的飞书自建应用后，系统定时自动接收其已结束会议的妙记/智能纪要，由会议分析子智能体（主 agent 委派）生成摘要与待办，结合长期记忆用户画像区分「属于我的待办」与「待确认事项」，到期自动提醒（应用内通知，可选邮件/微信外发）；会议正文写入独立会议知识库，可在对话中按需开启「会议检索」。
+
 ## 目录结构
 
 ```
@@ -107,6 +109,20 @@ cp .env.example .env    # 复制模板
 | `OLLAMA_API_KEY` | Ollama API 密钥 | `ollama` |
 | `DOC_EXTRACT_SECRET_KEY` | JWT 签名密钥（Agent 与 document_extract 共享） | `document-extract-key` |
 | `SERVICE_ACCOUNT_PASSWORD` | document_extract 服务账号密码 | `123456` |
+| `MEETING_SYNC_INTERVAL` | 飞书会议同步轮询间隔（秒） | `300` |
+| `MEETING_SYNC_LOOKBACK_DAYS` | 会议同步回看窗口（天，≤90） | `3` |
+| `MEETING_REMIND_LEAD_MINUTES` | 会议待办提前提醒（分钟） | `30` |
+| `SMTP_HOST/PORT/USER/PASSWORD/FROM` | 邮件通知 SMTP（可选，用户在页面启用） | 空 |
+
+## 飞书会议功能
+
+1. **账号配置（数据隔离）**：每个用户在「飞书会议」页配置自己的飞书自建应用（App ID / App Secret / 本人 Open ID）。会议检索按「参会人 = 本人」过滤，且各用户凭证独立，双重保证只接收属于自己的会议数据。应用需开通「获取会议信息（含智能纪要/逐字稿）」与「查看云文档」权限。
+2. **自动接收**：后台每 5 分钟轮询已结束会议，自动拉取妙记/智能纪要正文，无需手动上传。
+3. **子 agent 处理**：主 agent 通过 `process_meeting` / `list_my_meetings` 工具把会议委派给「会议分析师」子 agent（Orchestrator-Workers 模式），收集摘要、要点与待办。
+4. **我的待办**：子 agent 结合长期记忆用户画像三分类（我的 / 待确认 / 他人）；「待确认」事项由用户在页面手动确认或拒绝。
+5. **定时提醒**：待办截止前 30 分钟自动提醒；应用内通知为默认通道，可在设置中启用邮件（SMTP）与微信（Server酱）推送。
+6. **会议知识库**：会议正文写入独立 Qdrant 集合（与个人知识库物理隔离）；对话「+」菜单的「会议检索」开关控制是否启用检索。
+7. 冒烟测试：`cd backend/agent && python meetings_smoke_test.py`（需 DeepSeek Key；Ollama 嵌入不可用时自动跳过知识库用例）。
 
 ## 备注
 

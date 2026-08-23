@@ -171,12 +171,19 @@ start_service document_extract "$AGENT_ENV"    "$ROOT/document_extract" "$DOC_EX
 start_service document_compare "$AGENT_ENV"    "$ROOT/document_compare" "$DOC_COMPARE_PORT"
 
 # ── 记忆图谱基础设施（Neo4j，无 Docker 原生部署）───────────────
-# best-effort 拉起：未安装时提示跳过（记忆模块自动降级旁路，不影响其他服务）；
-# 已在运行时 neo4j start 幂等无害。
+# best-effort 拉起：未安装/就绪超时不阻断其余服务（记忆模块自动降级旁路）；
+# 但须暴露真实失败原因——此前 >/dev/null 2>&1 把「未就绪」吞成模糊提示，
+# 无法定位端口冲突/锁文件/JDK/就绪超时等。输出捕获到日志，失败时回显尾部。
 if [ -x "$ROOT/install_memory_infra.sh" ]; then
-  "$ROOT/install_memory_infra.sh" start >/dev/null 2>&1 \
-    && echo "[记忆图谱] Neo4j 已启动" \
-    || echo "[记忆图谱] Neo4j 未就绪（记忆功能降级；首次请执行 backend/install_memory_infra.sh install）"
+  neo4j_log="$LOG_DIR/neo4j_start.log"
+  if "$ROOT/install_memory_infra.sh" start >"$neo4j_log" 2>&1; then
+    echo "[记忆图谱] Neo4j 已启动"
+  else
+    echo "[记忆图谱] Neo4j 未就绪，记忆功能降级（其余服务不受影响）。失败原因："
+    tail -n 12 "$neo4j_log" 2>/dev/null | sed 's/^/    /'
+    echo "    排查：查看 $LOG_DIR/neo4j_start.log；首次安装执行 backend/install_memory_infra.sh install；"
+    echo "    或在 .env 设 MEMORY_GRAPH_ENABLED=false 关闭记忆模块以消除自愈重试日志。"
+  fi
 fi
 
 # ── 记忆图谱 Celery worker（启用 Celery 时随栈启动）─────────

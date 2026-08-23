@@ -62,3 +62,7 @@ frontend/dist/
 .vscode/
 .idea/
 .DS_Store
+
+# 飞书会议运行时数据（元数据库 / 会议知识库向量库，含 WAL/SHM 侧车文件）
+backend/agent/meetings.db*
+backend/agent/meetings_qdrant/

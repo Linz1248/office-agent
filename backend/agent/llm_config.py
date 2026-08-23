@@ -198,3 +198,16 @@ def get_memory_graph_chat_model():
         stream=False, thinking_enable=False, temperature=0.2
     )
     return model
+
+
+def get_meeting_model():
+    """会议分析子 agent 模型：非流式、非思维链、低温度（0.2）。
+
+    供 ``meetings`` 模块的「会议分析师」子 agent 生成摘要与待办的结构化输出
+    （structured_schema），与记忆图谱模型同一配置：低温度保证 JSON 稳定，
+    非流式避免抢占主推理的流式连接。
+    """
+    model, _ = _build_model_and_formatter(
+        stream=False, thinking_enable=False, temperature=0.2
+    )
+    return model
