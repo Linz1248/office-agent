@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 850" width="1300" height="850">
+  <defs>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;display=swap");
+      text { font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif; }
+      .title { font-size: 38px; font-weight: 700; fill: #1e3a5f; }
+      .layer-title { font-size: 26px; font-weight: 700; }
+      .layer-subtitle { font-size: 15px; fill: #4a5568; margin-top: 5px; }
+      .module-text { font-size: 15px; font-weight: 500; }
+      .arrow-label { font-size: 13px; fill: #4a5568; }
+      .port-text { font-size: 13px; fill: #e53e3e; font-weight: 600; }
+      .legend-text { font-size: 14px; fill: #2d3748; }
+    </style>
+    <!-- 箭头标记 -->
+    <marker id="arrow-gray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#4a5568"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#3182ce"/>
+    </marker>
+    <marker id="arrow-green-dash" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#38a169"/>
+    </marker>
+    <!-- 阴影滤镜 -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="2" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1300" height="850" fill="#ffffff"/>
+
+  <!-- 标题 -->
+  <text x="650" y="50" text-anchor="middle" class="title">系统总体架构 · 四层分层设计</text>
+
+  <!-- 企业内网边界（红色虚线框） -->
+  <rect x="40" y="80" width="1050" height="680" rx="15" ry="15" fill="none" stroke="#e53e3e" stroke-width="3" stroke-dasharray="10,5"/>
+  <rect x="50" y="70" width="180" height="35" rx="8" ry="8" fill="#fed7d7" stroke="#e53e3e" stroke-width="2"/>
+  <text x="140" y="95" text-anchor="middle" font-size="18" font-weight="700" fill="#c53030">企业内网 · 数据零出域</text>
+
+  <!-- 左侧直连标注 -->
+  <text x="60" y="400" text-anchor="middle" font-size="13" fill="#3182ce" transform="rotate(-90, 60, 400)">界面直连: /extract · /compare · /multimodel (不经智能体)</text>
+
+  <!-- ======================================== -->
+  <!-- 表现层 -->
+  <!-- ======================================== -->
+  <rect x="110" y="120" width="920" height="90" rx="12" ry="12" fill="#ebf8ff" stroke="#3182ce" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="110" y="120" width="15" height="90" rx="8" ry="8" fill="#3182ce"/>
+  <text x="150" y="160" class="layer-title" fill="#2c5282">表现层</text>
+  <text x="250" y="160" class="layer-title" fill="#1a365d">交互界面 + 统一网关 :8080</text>
+  <text x="150" y="190" class="layer-subtitle" fill="#2b6cb0">对话式交互 · 流式推送 · 统一路由 · 跨域与鉴权</text>
+
+  <!-- 表现层 -> 智能层 箭头 -->
+  <line x1="570" y1="210" x2="570" y2="250" stroke="#4a5568" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <rect x="590" y="220" width="140" height="28" rx="6" ry="6" fill="#f7fafc" stroke="#a0aec0" stroke-width="1"/>
+  <text x="660" y="240" text-anchor="middle" class="arrow-label">统一网关路由 /agent</text>
+
+  <!-- ======================================== -->
+  <!-- 智能层 -->
+  <!-- ======================================== -->
+  <rect x="110" y="260" width="920" height="190" rx="12" ry="12" fill="#faf5ff" stroke="#805ad5" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="110" y="260" width="15" height="190" rx="8" ry="8" fill="#805ad5"/>
+  <text x="150" y="300" class="layer-title" fill="#553c9a">智能层</text>
+  <text x="250" y="300" class="layer-title" fill="#44337a">ReAct 智能体（平台"大脑"）:9093</text>
+  <text x="150" y="330" class="layer-subtitle" fill="#6b46c1">意图理解 · 任务分解 · 多轮推理 · 自动上下文压缩 · 主辅模型分工</text>
+
+  <!-- 用户级四类资产 -->
+  <rect x="140" y="350" width="120" height="50" rx="10" ry="10" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+  <text x="200" y="382" text-anchor="middle" class="module-text" fill="#553c9a">长期记忆</text>
+
+  <rect x="275" y="350" width="130" height="50" rx="10" ry="10" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+  <text x="340" y="382" text-anchor="middle" class="module-text" fill="#553c9a">个人知识库</text>
+
+  <rect x="420" y="350" width="130" height="50" rx="10" ry="10" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+  <text x="485" y="382" text-anchor="middle" class="module-text" fill="#553c9a">会议知识库</text>
+
+  <rect x="565" y="350" width="120" height="50" rx="10" ry="10" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+  <text x="625" y="382" text-anchor="middle" class="module-text" fill="#553c9a">业务技能</text>
+
+  <text x="140" y="425" class="layer-subtitle" fill="#6b46c1">用户级四类资产 · 越用越强（本地向量库 / 图数据库存储）</text>
+
+  <!-- 会议待办模块（虚线框） -->
+  <rect x="680" y="340" width="330" height="100" rx="10" ry="10" fill="#faf5ff" stroke="#805ad5" stroke-width="2" stroke-dasharray="6,4"/>
+  <text x="845" y="370" text-anchor="middle" class="module-text" fill="#553c9a" font-weight="700">会议待办模块</text>
+  <text x="845" y="395" text-anchor="middle" font-size="14" fill="#6b46c1">飞书轮询 · 会议分析师子智能体</text>
+  <text x="845" y="418" text-anchor="middle" font-size="14" fill="#6b46c1">归属判定 · 截止提醒 · 正文独立入库</text>
+
+  <!-- 智能层 -> 工具层 箭头 -->
+  <line x1="570" y1="450" x2="570" y2="490" stroke="#4a5568" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <rect x="590" y="460" width="120" height="28" rx="6" ry="6" fill="#f7fafc" stroke="#a0aec0" stroke-width="1"/>
+  <text x="650" y="480" text-anchor="middle" class="arrow-label">MCP 协议调用</text>
+
+  <!-- ======================================== -->
+  <!-- 工具层 -->
+  <!-- ======================================== -->
+  <rect x="110" y="500" width="920" height="90" rx="12" ry="12" fill="#e6fffa" stroke="#319795" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="110" y="500" width="15" height="90" rx="8" ry="8" fill="#319795"/>
+  <text x="150" y="540" class="layer-title" fill="#234e52">工具层</text>
+  <text x="250" y="540" class="layer-title" fill="#285e61">MCP 标准工具网关（平台"手"）:9091</text>
+  <text x="150" y="570" class="layer-subtitle" fill="#2c7a7b">能力标准化封装 · 凭证管理 · 结果长度保护 · 认证自动重试 · 直连能力服务</text>
+
+  <!-- 工具层 -> 能力层 箭头 -->
+  <line x1="570" y1="590" x2="570" y2="630" stroke="#4a5568" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <rect x="590" y="600" width="120" height="28" rx="6" ry="6" fill="#f7fafc" stroke="#a0aec0" stroke-width="1"/>
+  <text x="650" y="620" text-anchor="middle" class="arrow-label">服务接口调用</text>
+
+  <!-- ======================================== -->
+  <!-- 能力层 -->
+  <!-- ======================================== -->
+  <rect x="110" y="640" width="920" height="100" rx="12" ry="12" fill="#f0fff4" stroke="#38a169" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="110" y="640" width="15" height="100" rx="8" ry="8" fill="#38a169"/>
+  <text x="150" y="680" class="layer-title" fill="#22543d">能力层</text>
+  <text x="250" y="680" class="layer-title" fill="#276749">垂直能力服务 + 本地大模型推理引擎</text>
+
+  <!-- 能力模块 -->
+  <rect x="150" y="700" width="160" height="35" rx="8" ry="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+  <text x="230" y="723" text-anchor="middle" class="module-text" fill="#22543d">文档智能抽取 :9090</text>
+
+  <rect x="325" y="700" width="140" height="35" rx="8" ry="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+  <text x="395" y="723" text-anchor="middle" class="module-text" fill="#22543d">文档比对 :9900</text>
+
+  <rect x="480" y="700" width="150" height="35" rx="8" ry="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+  <text x="555" y="723" text-anchor="middle" class="module-text" fill="#22543d">多模态检索 :8000</text>
+
+  <rect x="645" y="695" width="360" height="45" rx="8" ry="8" fill="#9ae6b4" stroke="#2f855a" stroke-width="2"/>
+  <text x="825" y="723" text-anchor="middle" class="module-text" fill="#22543d" font-weight="600">本地大模型推理引擎（内网隔离 · 数据零出域）</text>
+
+  <!-- ======================================== -->
+  <!-- 飞书开放平台（外部） -->
+  <!-- ======================================== -->
+  <rect x="1130" y="320" width="150" height="130" rx="12" ry="12" fill="#f7fafc" stroke="#718096" stroke-width="2" stroke-dasharray="6,4"/>
+  <text x="1205" y="360" text-anchor="middle" font-size="18" font-weight="700" fill="#2d3748">飞书开放平台</text>
+  <text x="1205" y="390" text-anchor="middle" font-size="14" fill="#4a5568">用户授权账号</text>
+  <text x="1205" y="415" text-anchor="middle" font-size="14" fill="#4a5568">妙记转写</text>
+  <text x="1205" y="440" text-anchor="middle" font-size="14" fill="#4a5568">智能纪要</text>
+
+  <!-- 飞书 -> 会议待办 箭头 -->
+  <line x1="1130" y1="385" x2="1010" y2="385" stroke="#38a169" stroke-width="3" stroke-dasharray="8,4" marker-end="url(#arrow-green-dash)"/>
+  <text x="1070" y="335" text-anchor="middle" font-size="13" fill="#2f855a">会议纪要拉取</text>
+  <text x="1070" y="355" text-anchor="middle" font-size="12" fill="#2f855a">（唯一外部依赖 · 入域）</text>
+
+  <!-- 界面直连虚线箭头 -->
+  <path d="M 80 200 Q 80 720 110 720" stroke="#3182ce" stroke-width="3" stroke-dasharray="8,4" fill="none" marker-end="url(#arrow-blue)"/>
+
+  <!-- ======================================== -->
+  <!-- 图例 -->
+  <!-- ======================================== -->
+  <rect x="40" y="780" width="1220" height="50" rx="10" ry="10" fill="#f7fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="70" y1="805" x2="120" y2="805" stroke="#4a5568" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <text x="130" y="810" class="legend-text">调用链路（自上而下就绪）</text>
+
+  <line x1="350" y1="805" x2="400" y2="805" stroke="#3182ce" stroke-width="3" stroke-dasharray="8,4" marker-end="url(#arrow-blue)"/>
+  <text x="410" y="810" class="legend-text">界面直连（网关直接路由能力服务）</text>
+
+  <line x1="680" y1="805" x2="730" y2="805" stroke="#38a169" stroke-width="3" stroke-dasharray="8,4" marker-end="url(#arrow-green-dash)"/>
+  <text x="740" y="810" class="legend-text">会议纪要拉取（方向入域，企业数据不出内网）</text>
+
+</svg>

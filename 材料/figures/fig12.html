@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1400" height="840" viewBox="0 0 1400 840" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <text x="700" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">平台页面导航与信息架构 · 一个对话入口 + 六类功能工作台</text>
+
+  <!-- 登录注册 -->
+  <rect x="80" y="78" width="380" height="52" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="270" y="110" text-anchor="middle" font-size="15" font-weight="600" fill="#334155">登录 / 注册（无侧边栏 · 路由守卫拦截未登录访问）</text>
+  <line x1="270" y1="130" x2="270" y2="158" stroke="#475569" stroke-width="2" marker-end="url(#ar)"/>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>
+
+  <!-- 主框架 -->
+  <rect x="60" y="162" width="480" height="580" rx="14" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <text x="300" y="192" text-anchor="middle" font-size="17" font-weight="700" fill="#1e3a5f">主框架（登录后所有页面共享）</text>
+  <!-- 侧边栏 -->
+  <rect x="84" y="208" width="222" height="512" rx="10" fill="#1e293b"/>
+  <text x="100" y="238" font-size="15" font-weight="700" fill="#fff">慧办</text>
+  <text x="164" y="238" font-size="10.5" fill="#94a3b8">AI 智慧办公平台</text>
+  <rect x="96" y="254" width="198" height="34" rx="8" fill="#2563eb"/>
+  <text x="195" y="276" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">★ AI 办公搭子（置顶）</text>
+
+  <rect x="99" y="304" width="9" height="9" fill="#d97706"/><text x="116" y="313" font-size="13.5" font-weight="600" fill="#e2e8f0">文档工具 ▾</text>
+  <text x="116" y="334" font-size="12" fill="#94a3b8">　文档抽取 · 文档比对</text>
+  <rect x="99" y="352" width="9" height="9" fill="#0d9488"/><text x="116" y="361" font-size="13.5" font-weight="600" fill="#e2e8f0">图像检索 ▾</text>
+  <text x="116" y="382" font-size="12" fill="#94a3b8">　图像库 · 图搜图 · 文搜图</text>
+  <rect x="99" y="400" width="9" height="9" fill="#0284c7"/><text x="116" y="409" font-size="13.5" font-weight="600" fill="#e2e8f0">音频检索 ▾</text>
+  <text x="116" y="430" font-size="12" fill="#94a3b8">　音频库 · 文本搜音频</text>
+  <rect x="99" y="448" width="9" height="9" fill="#7c3aed"/><text x="116" y="457" font-size="13.5" font-weight="600" fill="#e2e8f0">知识库 ▾</text>
+  <text x="116" y="478" font-size="12" fill="#94a3b8">　个人知识库</text>
+  <rect x="99" y="496" width="9" height="9" fill="#16a34a"/><text x="116" y="505" font-size="13.5" font-weight="600" fill="#e2e8f0">我的会议 ▾</text>
+  <text x="116" y="526" font-size="12" fill="#94a3b8">　会议与待办</text>
+  <rect x="99" y="544" width="9" height="9" fill="#4f46e5"/><text x="116" y="553" font-size="13.5" font-weight="600" fill="#e2e8f0">Skill 系统 ▾</text>
+  <text x="116" y="574" font-size="12" fill="#94a3b8">　我的技能 · 技能市场</text>
+
+  <line x1="96" y1="614" x2="290" y2="614" stroke="#334155" stroke-width="1.5"/>
+  <text x="100" y="640" font-size="12.5" fill="#cbd5e1">用户头像 · 会议通知铃铛（未读数）</text>
+  <text x="100" y="662" font-size="12.5" fill="#cbd5e1">明暗主题切换 · 修改密码 · 退出</text>
+  <text x="100" y="690" font-size="12.5" fill="#93c5fd">记忆图谱：头像菜单进入（粉色标记）</text>
+
+  <!-- 内容区 -->
+  <rect x="318" y="208" width="198" height="512" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="417" y="450" text-anchor="middle" font-size="14" fill="#64748b">内容区</text>
+  <text x="417" y="474" text-anchor="middle" font-size="13" fill="#64748b">按导航分组切换页面</text>
+  <text x="417" y="498" text-anchor="middle" font-size="13" fill="#64748b">共 15 个页面</text>
+
+  <!-- 左列卡片 x=580 w=340 -->
+  <rect x="580" y="196" width="340" height="74" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2" filter="url(#sh)"/>
+  <rect x="580" y="196" width="9" height="74" rx="4" fill="#2563eb"/>
+  <text x="604" y="224" font-size="15.5" font-weight="700" fill="#1e3a8a">AI 办公搭子 · 对话页</text>
+  <text x="604" y="248" font-size="12.5" fill="#1d4ed8">会话管理 · 思考过程与工具调用可视</text>
+  <text x="604" y="264" font-size="12.5" fill="#1d4ed8">附件提问 · 澄清点选 · 流式输出与中断</text>
+
+  <rect x="580" y="290" width="340" height="74" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2" filter="url(#sh)"/>
+  <rect x="580" y="290" width="9" height="74" rx="4" fill="#d97706"/>
+  <text x="604" y="318" font-size="15.5" font-weight="700" fill="#92400e">文档工具</text>
+  <text x="604" y="342" font-size="12.5" fill="#b45309">文档抽取（手填字段 / Excel 模板）</text>
+  <text x="604" y="358" font-size="12.5" fill="#b45309">文档比对 A/B 上传 · 比对结果差异色块审阅</text>
+
+  <rect x="580" y="384" width="340" height="74" rx="10" fill="#f0fdfa" stroke="#0d9488" stroke-width="2" filter="url(#sh)"/>
+  <rect x="580" y="384" width="9" height="74" rx="4" fill="#0d9488"/>
+  <text x="604" y="412" font-size="15.5" font-weight="700" fill="#134e4a">图像检索</text>
+  <text x="604" y="436" font-size="12.5" fill="#0f766e">图像库（批量入库 · 索引状态）</text>
+  <text x="604" y="452" font-size="12.5" fill="#0f766e">文搜图 / 图搜图（可调返回数量）</text>
+
+  <rect x="580" y="478" width="340" height="74" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="2" filter="url(#sh)"/>
+  <rect x="580" y="478" width="9" height="74" rx="4" fill="#0284c7"/>
+  <text x="604" y="506" font-size="15.5" font-weight="700" fill="#0c4a6e">音频检索</text>
+  <text x="604" y="530" font-size="12.5" fill="#0369a1">音频库（批量入库 · 索引状态）</text>
+  <text x="604" y="546" font-size="12.5" fill="#0369a1">文本搜音频（转写内容语义匹配）</text>
+
+  <rect x="580" y="572" width="340" height="74" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <rect x="580" y="572" width="9" height="74" rx="4" fill="#7c3aed"/>
+  <text x="604" y="600" font-size="15.5" font-weight="700" fill="#4c1d95">知识库</text>
+  <text x="604" y="624" font-size="12.5" fill="#6d28d9">个人知识库：拖拽上传 · 自动索引</text>
+  <text x="604" y="640" font-size="12.5" fill="#6d28d9">检索 / 共享双开关 · 页内知识检索</text>
+
+  <!-- 右列卡片 x=950 w=390 -->
+  <rect x="950" y="196" width="390" height="74" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <rect x="950" y="196" width="9" height="74" rx="4" fill="#16a34a"/>
+  <text x="974" y="224" font-size="15.5" font-weight="700" fill="#14532d">我的会议</text>
+  <text x="974" y="248" font-size="12.5" fill="#15803d">会议与待办：会议列表 · 我的待办</text>
+  <text x="974" y="264" font-size="12.5" fill="#15803d">待我确认 · 接收设置（绑定飞书账号）</text>
+
+  <rect x="950" y="290" width="390" height="74" rx="10" fill="#eef2ff" stroke="#4f46e5" stroke-width="2" filter="url(#sh)"/>
+  <rect x="950" y="290" width="9" height="74" rx="4" fill="#4f46e5"/>
+  <text x="974" y="318" font-size="15.5" font-weight="700" fill="#312e81">Skill 系统</text>
+  <text x="974" y="342" font-size="12.5" fill="#4338ca">我的技能：创建 / 编辑 / 启用开关</text>
+  <text x="974" y="358" font-size="12.5" fill="#4338ca">技能市场：浏览 / 安装 / 检查更新</text>
+
+  <rect x="950" y="384" width="390" height="74" rx="10" fill="#fdf2f8" stroke="#db2777" stroke-width="2" filter="url(#sh)"/>
+  <rect x="950" y="384" width="9" height="74" rx="4" fill="#db2777"/>
+  <text x="974" y="412" font-size="15.5" font-weight="700" fill="#831843">记忆图谱（个人资产页）</text>
+  <text x="974" y="436" font-size="12.5" fill="#9d174d">四层节点可视化 · 类型过滤 · 定位</text>
+  <text x="974" y="452" font-size="12.5" fill="#9d174d">主动记住 · 合并 / 巩固 / 反思维护</text>
+
+  <!-- 分组说明卡 -->
+  <rect x="580" y="666" width="760" height="60" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="604" y="691" font-size="13.5" font-weight="600" fill="#334155">分组颜色与左侧导航一一对应；对话入口承担日常任务，六个分组承载批量处理与可视化审阅。</text>
+  <text x="604" y="712" font-size="13.5" fill="#475569">以图搜脸等页面未单独开设的检索组合，经“AI 办公搭子”调用多模态检索工具完成。</text>
+
+  <!-- 图例线 -->
+  <rect x="46" y="762" width="1334" height="52" rx="9" fill="#fff" stroke="#e2e8f0"/>
+  <text x="72" y="786" font-size="13" fill="#64748b">左侧为共享侧边栏布局：置顶对话入口 + 六个可折叠分组 + 底部用户区；右侧为各分组包含的页面及其关键能力。</text>
+  <text x="72" y="806" font-size="13" fill="#64748b">登录与注册页独立于主框架，未登录访问由路由守卫统一重定向。</text>
+</svg>
+</body>
+</html>

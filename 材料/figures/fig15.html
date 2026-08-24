@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1400" height="880" viewBox="0 0 1400 880" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <linearGradient id="t1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#bae6fd"/><stop offset="1" stop-color="#7dd3fc"/></linearGradient>
+    <linearGradient id="t2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a7f3d0"/><stop offset="1" stop-color="#6ee7b7"/></linearGradient>
+    <linearGradient id="t3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="1" stop-color="#fcd34d"/></linearGradient>
+    <linearGradient id="t4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ddd6fe"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient>
+    <linearGradient id="t5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbcfe8"/><stop offset="1" stop-color="#f9a8d4"/></linearGradient>
+    <linearGradient id="t6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#99f6e4"/><stop offset="1" stop-color="#5eead4"/></linearGradient>
+  </defs>
+
+  <text x="700" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">跨模态检索页面原型 · 库构建与语义查询分离</text>
+
+  <!-- 左：文搜图 -->
+  <rect x="70" y="70" width="440" height="740" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="70" y="70" width="440" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="70" y="98" width="440" height="12" fill="#f1f5f9"/>
+  <circle cx="96" cy="90" r="7" fill="#f87171"/><circle cx="120" cy="90" r="7" fill="#fbbf24"/><circle cx="144" cy="90" r="7" fill="#4ade80"/>
+  <text x="290" y="95" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · 文搜图</text>
+
+  <text x="106" y="146" font-size="19" font-weight="700" fill="#1e3a5f">文搜图</text>
+  <!-- 查询行 -->
+  <rect x="106" y="164" width="220" height="36" rx="8" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="118" y="187" font-size="12.5" fill="#334155">施工现场 塔吊 夜间作业</text>
+  <rect x="334" y="164" width="58" height="36" rx="8" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="363" y="187" text-anchor="middle" font-size="12.5" fill="#334155">Top 5</text>
+  <rect x="400" y="164" width="74" height="36" rx="8" fill="#0d9488"/>
+  <text x="437" y="187" text-anchor="middle" font-size="13" font-weight="600" fill="#fff">搜索</text>
+  <text x="106" y="226" font-size="11.5" fill="#94a3b8">将返回语义最相似的 5 张图片，可在画廊中点开放大</text>
+
+  <!-- 结果网格 -->
+  <g>
+    <rect x="106" y="244" width="112" height="84" rx="8" fill="url(#t1)"/><text x="162" y="344" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.92</text>
+    <rect x="228" y="244" width="112" height="84" rx="8" fill="url(#t2)"/><text x="284" y="344" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.88</text>
+    <rect x="350" y="244" width="112" height="84" rx="8" fill="url(#t3)"/><text x="406" y="344" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.85</text>
+    <rect x="106" y="362" width="112" height="84" rx="8" fill="url(#t4)"/><text x="162" y="462" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.81</text>
+    <rect x="228" y="362" width="112" height="84" rx="8" fill="url(#t5)"/><text x="284" y="462" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.78</text>
+    <rect x="350" y="362" width="112" height="84" rx="8" fill="url(#t6)"/><text x="406" y="462" text-anchor="middle" font-size="11.5" fill="#0f766e">相似度 0.74</text>
+  </g>
+
+  <!-- 图搜图 mini -->
+  <rect x="106" y="492" width="368" height="130" rx="10" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="122" y="520" font-size="13.5" font-weight="700" fill="#134e4a">图搜图（同构页面）</text>
+  <rect x="122" y="534" width="88" height="66" rx="8" fill="#fff" stroke="#0d9488" stroke-width="1.5"/>
+  <path d="M 148 552 l 18 26 14 -14 16 22 h -56 z" fill="#94a3b8"/>
+  <circle cx="140" cy="546" r="5" fill="#cbd5e1"/>
+  <text x="166" y="571" text-anchor="middle" font-size="10" fill="#475569">样例图片</text>
+  <line x1="214" y1="567" x2="240" y2="567" stroke="#0d9488" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="250" y="534" width="64" height="66" rx="6" fill="url(#t1)"/>
+  <rect x="322" y="534" width="64" height="66" rx="6" fill="url(#t2)"/>
+  <rect x="394" y="534" width="64" height="66" rx="6" fill="url(#t4)"/>
+  <text x="282" y="552" text-anchor="middle" font-size="10" fill="#fff">0.93</text>
+  <text x="354" y="552" text-anchor="middle" font-size="10" fill="#fff">0.89</text>
+  <text x="426" y="552" text-anchor="middle" font-size="10" fill="#fff">0.86</text>
+
+  <!-- 文搜音 mini -->
+  <rect x="106" y="638" width="368" height="130" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="122" y="666" font-size="13.5" font-weight="700" fill="#0c4a6e">文本搜音频（同构页面）</text>
+  <rect x="122" y="680" width="180" height="30" rx="8" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="132" y="700" font-size="11.5" fill="#334155">设备异响 现场录音</text>
+  <rect x="122" y="722" width="336" height="34" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <circle cx="140" cy="739" r="9" fill="#0284c7"/><path d="M 137 734 l 7 5 -7 5 z" fill="#fff"/>
+  <text x="158" y="736" font-size="11" fill="#334155">泵机巡检-0812.mp3　02:41</text>
+  <rect x="158" y="744" width="230" height="5" rx="2.5" fill="#e2e8f0"/><rect x="158" y="744" width="150" height="5" rx="2.5" fill="#0284c7"/>
+  <text x="440" y="736" text-anchor="end" font-size="11" fill="#0369a1">0.87</text>
+
+  <!-- 右：图像库 -->
+  <rect x="550" y="70" width="420" height="740" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="550" y="70" width="420" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="550" y="98" width="420" height="12" fill="#f1f5f9"/>
+  <circle cx="576" cy="90" r="7" fill="#f87171"/><circle cx="600" cy="90" r="7" fill="#fbbf24"/><circle cx="624" cy="90" r="7" fill="#4ade80"/>
+  <text x="760" y="95" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · 图像库</text>
+
+  <text x="586" y="146" font-size="19" font-weight="700" fill="#1e3a5f">图像库</text>
+  <rect x="790" y="126" width="150" height="28" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.4"/>
+  <text x="865" y="145" text-anchor="middle" font-size="12" fill="#15803d">1,286 张 · 索引就绪</text>
+
+  <!-- 上传区 -->
+  <rect x="586" y="164" width="348" height="92" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="7 5"/>
+  <path d="M 760 186 v 22 M 750 198 l 10 -10 10 10" stroke="#0d9488" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="760" y="222" text-anchor="middle" font-size="13" fill="#475569">拖拽图片到此处，或点击选择</text>
+  <text x="760" y="242" text-anchor="middle" font-size="11.5" fill="#94a3b8">支持批量上传 · JPG / PNG</text>
+
+  <!-- 列表 -->
+  <rect x="586" y="276" width="348" height="66" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="600" y="290" width="38" height="38" rx="6" fill="url(#t1)"/>
+  <text x="650" y="304" font-size="12.5" font-weight="600" fill="#1e293b">IMG_2041.jpg</text>
+  <text x="650" y="324" font-size="11" fill="#94a3b8">2.4 MB · 08-21 上传</text>
+  <rect x="842" y="296" width="76" height="22" rx="11" fill="#dcfce7"/><text x="880" y="311" text-anchor="middle" font-size="11" fill="#15803d">已索引</text>
+
+  <rect x="586" y="352" width="348" height="66" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="600" y="366" width="38" height="38" rx="6" fill="url(#t3)"/>
+  <text x="650" y="380" font-size="12.5" font-weight="600" fill="#1e293b">厂区巡检-017.png</text>
+  <rect x="650" y="390" width="180" height="8" rx="4" fill="#f1f5f9"/><rect x="650" y="390" width="112" height="8" rx="4" fill="#0d9488"/>
+  <text x="842" y="399" font-size="11" fill="#0f766e">索引中 62%</text>
+
+  <rect x="586" y="428" width="348" height="66" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="600" y="442" width="38" height="38" rx="6" fill="url(#t5)"/>
+  <text x="650" y="456" font-size="12.5" font-weight="600" fill="#1e293b">会议白板-03.jpg</text>
+  <text x="650" y="476" font-size="11" fill="#94a3b8">1.1 MB · 08-20 上传</text>
+  <rect x="842" y="448" width="76" height="22" rx="11" fill="#dcfce7"/><text x="880" y="463" text-anchor="middle" font-size="11" fill="#15803d">已索引</text>
+
+  <rect x="586" y="504" width="348" height="66" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="600" y="518" width="38" height="38" rx="6" fill="url(#t2)"/>
+  <text x="650" y="532" font-size="12.5" font-weight="600" fill="#1e293b">IMG_1988.jpg</text>
+  <text x="650" y="552" font-size="11" fill="#dc2626">❗ 特征提取失败</text>
+  <rect x="842" y="524" width="76" height="22" rx="11" fill="#fee2e2"/><text x="880" y="539" text-anchor="middle" font-size="11" fill="#b91c1c">重试</text>
+
+  <!-- 索引维护说明 -->
+  <rect x="586" y="592" width="348" height="176" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="602" y="620" font-size="13.5" font-weight="700" fill="#1e3a5f">索引自适应维护</text>
+  <text x="602" y="646" font-size="12.5" fill="#475569">· 资源库变动经去抖窗口确认后，</text>
+  <text x="602" y="666" font-size="12.5" fill="#475569">　 自动触发增量重建</text>
+  <text x="602" y="692" font-size="12.5" fill="#475569">· 重建过程可安全中断，索引与</text>
+  <text x="602" y="712" font-size="12.5" fill="#475569">　 资源库始终一致</text>
+  <text x="602" y="738" font-size="12.5" fill="#475569">· 特征向量 L2 归一化入库，</text>
+  <text x="602" y="758" font-size="12.5" fill="#475569">　 跨模态在同一几何度量下比较</text>
+
+  <!-- 标注圆点 -->
+  <g font-size="12" font-weight="700" fill="#fff">
+    <circle cx="490" cy="182" r="11" fill="#1e3a5f"/><text x="490" y="186" text-anchor="middle">1</text>
+    <circle cx="490" cy="286" r="11" fill="#1e3a5f"/><text x="490" y="290" text-anchor="middle">2</text>
+    <circle cx="490" cy="557" r="11" fill="#1e3a5f"/><text x="490" y="561" text-anchor="middle">3</text>
+    <circle cx="924" cy="210" r="11" fill="#1e3a5f"/><text x="924" y="214" text-anchor="middle">4</text>
+    <circle cx="924" cy="385" r="11" fill="#1e3a5f"/><text x="924" y="389" text-anchor="middle">5</text>
+  </g>
+
+  <!-- 右侧说明栏 -->
+  <rect x="1000" y="70" width="380" height="770" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="1024" y="108" font-size="18" font-weight="700" fill="#1e3a5f">设计要点</text>
+  <g font-size="13.5">
+    <circle cx="1036" cy="142" r="11" fill="#1e3a5f"/><text x="1036" y="147" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">1</text>
+    <text x="1058" y="139" font-weight="600" fill="#1e293b">查询形态三分离</text>
+    <text x="1058" y="159" fill="#475569">文搜图输入描述、图搜图上传</text>
+    <text x="1058" y="179" fill="#475569">样例、文本搜音频输入关键词，</text>
+    <text x="1058" y="199" fill="#475569">返回数量 1–50 可调</text>
+
+    <circle cx="1036" cy="238" r="11" fill="#1e3a5f"/><text x="1036" y="243" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">2</text>
+    <text x="1058" y="235" font-weight="600" fill="#1e293b">结果带得分排序</text>
+    <text x="1058" y="255" fill="#475569">结果按相似度降序排列，逐张</text>
+    <text x="1058" y="275" fill="#475569">标注得分，命中质量直观可判</text>
+
+    <circle cx="1036" cy="314" r="11" fill="#1e3a5f"/><text x="1036" y="319" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">3</text>
+    <text x="1058" y="311" font-weight="600" fill="#1e293b">同构页面族</text>
+    <text x="1058" y="331" fill="#475569">三个检索页面共用一套版式，</text>
+    <text x="1058" y="351" fill="#475569">学会一个即会用全部</text>
+
+    <circle cx="1036" cy="390" r="11" fill="#1e3a5f"/><text x="1036" y="395" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">4</text>
+    <text x="1058" y="387" font-weight="600" fill="#1e293b">库页批量入库</text>
+    <text x="1058" y="407" fill="#475569">拖拽批量上传，特征提取与</text>
+    <text x="1058" y="427" fill="#475569">入库自动完成，失败可重试</text>
+
+    <circle cx="1036" cy="466" r="11" fill="#1e3a5f"/><text x="1036" y="471" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">5</text>
+    <text x="1058" y="463" font-weight="600" fill="#1e293b">索引状态可见</text>
+    <text x="1058" y="483" fill="#475569">每份资源独立显示已索引 /</text>
+    <text x="1058" y="503" fill="#475569">索引进度 / 失败状态，</text>
+    <text x="1058" y="523" fill="#475569">入库到可检索全程可追踪</text>
+  </g>
+  <rect x="1024" y="560" width="332" height="250" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="1040" y="588" font-size="13" font-weight="600" fill="#1e3a5f">与对话入口的分工</text>
+  <text x="1040" y="614" font-size="12.5" fill="#475569">页面检索适合明确目标下的</text>
+  <text x="1040" y="634" font-size="12.5" fill="#475569">浏览与筛选；开放式组合查询</text>
+  <text x="1040" y="654" font-size="12.5" fill="#475569">（如“找到上季度巡检里出现</text>
+  <text x="1040" y="674" font-size="12.5" fill="#475569">塔吊的图，再搜相关录音”）</text>
+  <text x="1040" y="694" font-size="12.5" fill="#475569">由“AI 办公搭子”编排完成，</text>
+  <text x="1040" y="714" font-size="12.5" fill="#475569">页面未覆盖的以图搜脸等组合</text>
+  <text x="1040" y="734" font-size="12.5" fill="#475569">同样经对话调用多模态工具。</text>
+</svg>
+</body>
+</html>

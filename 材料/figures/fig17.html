@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1400" height="880" viewBox="0 0 1400 880" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <text x="700" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">会议与待办页原型 · 从“开过会”到“办完事”</text>
+
+  <!-- 主框架 -->
+  <rect x="70" y="70" width="900" height="740" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="70" y="70" width="900" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="70" y="98" width="900" height="12" fill="#f1f5f9"/>
+  <circle cx="96" cy="90" r="7" fill="#f87171"/><circle cx="120" cy="90" r="7" fill="#fbbf24"/><circle cx="144" cy="90" r="7" fill="#4ade80"/>
+  <text x="450" y="95" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · 我的会议</text>
+
+  <text x="106" y="146" font-size="20" font-weight="700" fill="#1e3a5f">我的会议</text>
+
+  <!-- 统计卡 -->
+  <rect x="106" y="162" width="256" height="64" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <text x="234" y="190" text-anchor="middle" font-size="20" font-weight="700" fill="#15803d">12</text>
+  <text x="234" y="212" text-anchor="middle" font-size="11.5" fill="#64748b">已接收会议</text>
+  <rect x="378" y="162" width="256" height="64" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="506" y="190" text-anchor="middle" font-size="20" font-weight="700" fill="#1d4ed8">5</text>
+  <text x="506" y="212" text-anchor="middle" font-size="11.5" fill="#64748b">我的待办</text>
+  <rect x="650" y="162" width="256" height="64" rx="10" fill="#fff7ed" stroke="#fed7aa"/>
+  <text x="778" y="190" text-anchor="middle" font-size="20" font-weight="700" fill="#c2410c">2</text>
+  <text x="778" y="212" text-anchor="middle" font-size="11.5" fill="#64748b">待我确认</text>
+
+  <!-- 标签 -->
+  <rect x="106" y="244" width="560" height="40" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="106" y="244" width="180" height="40" rx="10" fill="#16a34a"/>
+  <text x="196" y="270" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">📹 会议列表</text>
+  <text x="360" y="270" text-anchor="middle" font-size="14" fill="#64748b">☐ 我的待办</text>
+  <rect x="430" y="252" width="26" height="20" rx="10" fill="#ea580c"/>
+  <text x="443" y="266" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">2</text>
+  <text x="580" y="270" text-anchor="middle" font-size="14" fill="#64748b">⚙ 接收设置</text>
+
+  <!-- 左：会议列表 -->
+  <rect x="106" y="300" width="420" height="48" rx="10" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <text x="122" y="330" font-size="12.5" fill="#166534">每 30 分钟自动同步已结束会议</text>
+  <rect x="400" y="310" width="110" height="28" rx="8" fill="#16a34a"/>
+  <text x="455" y="329" text-anchor="middle" font-size="12.5" fill="#fff">立即同步</text>
+
+  <rect x="106" y="364" width="420" height="72" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="122" y="382" width="36" height="36" rx="8" fill="#dcfce7"/>
+  <path d="M 132 390 h 16 v 20 h -16 z M 148 394 l 8 -5 v 16 l -8 -5" fill="none" stroke="#16a34a" stroke-width="2"/>
+  <text x="172" y="394" font-size="13" font-weight="600" fill="#1e293b">周例会 · 合同评审专项</text>
+  <text x="172" y="416" font-size="11" fill="#94a3b8">08-22 10:00 · 待办 3</text>
+  <rect x="424" y="390" width="88" height="22" rx="11" fill="#dcfce7"/><text x="468" y="405" text-anchor="middle" font-size="11" fill="#15803d">已分析</text>
+
+  <rect x="106" y="448" width="420" height="72" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="122" y="466" width="36" height="36" rx="8" fill="#f1f5f9"/>
+  <path d="M 132 474 h 16 v 20 h -16 z M 148 478 l 8 -5 v 16 l -8 -5" fill="none" stroke="#94a3b8" stroke-width="2"/>
+  <text x="172" y="478" font-size="13" font-weight="600" fill="#1e293b">供应商季度对接会</text>
+  <text x="172" y="500" font-size="11" fill="#94a3b8">08-21 15:30 · 待办 2</text>
+  <rect x="424" y="474" width="88" height="22" rx="11" fill="#f1f5f9"/><text x="468" y="489" text-anchor="middle" font-size="11" fill="#64748b">分析中</text>
+
+  <!-- 通知铃铛弹层 -->
+  <rect x="106" y="544" width="420" height="242" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="126" y="576" font-size="13.5" font-weight="700" fill="#1e293b">🔔 会议通知（侧边栏铃铛）</text>
+  <text x="500" y="576" text-anchor="end" font-size="11.5" fill="#16a34a">全部已读</text>
+  <rect x="122" y="592" width="388" height="56" rx="8" fill="#f0fdf4"/>
+  <circle cx="136" cy="606" r="3.5" fill="#16a34a"/>
+  <text x="146" y="610" font-size="12" font-weight="600" fill="#1e293b">新待办：提交三季度采购计划</text>
+  <text x="146" y="630" font-size="11" fill="#64748b">来自「周例会 · 合同评审专项」· 截止 08-28</text>
+  <rect x="122" y="656" width="388" height="56" rx="8" fill="#f8fafc"/>
+  <circle cx="136" cy="670" r="3.5" fill="#94a3b8"/>
+  <text x="146" y="674" font-size="12" fill="#334155">已接收：供应商季度对接会</text>
+  <text x="146" y="694" font-size="11" fill="#94a3b8">摘要与待办已生成 · 08-21 16:02</text>
+  <rect x="122" y="724" width="388" height="44" rx="8" fill="#f1f5f9"/>
+  <text x="316" y="751" text-anchor="middle" font-size="12.5" fill="#16a34a">前往我的会议 →</text>
+
+  <!-- 右：我的待办 -->
+  <rect x="546" y="300" width="360" height="486" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="562" y="330" font-size="14.5" font-weight="700" fill="#c2410c">待我确认</text>
+  <text x="562" y="350" font-size="11.5" fill="#94a3b8">以下事项由会议识别，不确定是否属于你</text>
+  <rect x="562" y="362" width="328" height="122" rx="10" fill="#fff" stroke="#fdba74"/>
+  <text x="578" y="388" font-size="13" font-weight="600" fill="#1e293b">整理评审意见并更新合同模板</text>
+  <text x="578" y="410" font-size="11" fill="#94a3b8">来自「周例会 · 合同评审专项」 · 指派：林</text>
+  <text x="578" y="428" font-size="11" fill="#94a3b8">依据：记忆画像 · 你负责合同评审（置信度中）</text>
+  <rect x="578" y="440" width="96" height="28" rx="8" fill="#16a34a"/>
+  <text x="626" y="459" text-anchor="middle" font-size="12" fill="#fff">加入待办</text>
+  <rect x="682" y="440" width="96" height="28" rx="8" fill="#fff" stroke="#cbd5e1"/>
+  <text x="730" y="459" text-anchor="middle" font-size="12" fill="#64748b">不属于我</text>
+
+  <text x="562" y="518" font-size="14.5" font-weight="700" fill="#1e3a8a">我的待办</text>
+  <text x="562" y="538" font-size="11.5" fill="#94a3b8">按截止时间排序，到期前自动提醒</text>
+  <rect x="562" y="550" width="328" height="88" rx="10" fill="#fff" stroke="#fca5a5"/>
+  <rect x="578" y="568" width="20" height="20" rx="5" fill="#fff" stroke="#ef4444" stroke-width="1.6"/>
+  <text x="608" y="583" font-size="13" font-weight="600" fill="#1e293b">提交三季度采购计划</text>
+  <rect x="608" y="594" width="130" height="20" rx="10" fill="#fee2e2"/>
+  <text x="673" y="608" text-anchor="middle" font-size="11" fill="#b91c1c">截止 08-28 · 即将到期</text>
+  <text x="608" y="626" font-size="11" fill="#94a3b8">来自「周例会 · 合同评审专项」</text>
+
+  <rect x="562" y="650" width="328" height="60" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="578" y="664" width="20" height="20" rx="5" fill="#16a34a"/>
+  <path d="M 583 674 l 4 4 7 -8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="608" y="679" font-size="13" fill="#334155">更新供应商名录并发送纪要</text>
+  <text x="608" y="698" font-size="11" fill="#94a3b8">来自「供应商季度对接会」 · 无明确截止</text>
+
+  <!-- 接收设置 mini -->
+  <rect x="546" y="724" width="360" height="62" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="562" y="748" font-size="12.5" font-weight="600" fill="#1e293b">接收设置</text>
+  <text x="562" y="770" font-size="11.5" fill="#94a3b8">绑定飞书账号（授权一次） · 同步间隔 30 分钟</text>
+
+  <!-- 标注圆点 -->
+  <g font-size="12" font-weight="700" fill="#fff">
+    <circle cx="98" cy="194" r="11" fill="#1e3a5f"/><text x="98" y="198" text-anchor="middle">1</text>
+    <circle cx="98" cy="324" r="11" fill="#1e3a5f"/><text x="98" y="328" text-anchor="middle">2</text>
+    <circle cx="534" cy="420" r="11" fill="#1e3a5f"/><text x="534" y="424" text-anchor="middle">3</text>
+    <circle cx="534" cy="594" r="11" fill="#1e3a5f"/><text x="534" y="598" text-anchor="middle">4</text>
+    <circle cx="98" cy="620" r="11" fill="#1e3a5f"/><text x="98" y="624" text-anchor="middle">5</text>
+    <circle cx="534" cy="752" r="11" fill="#1e3a5f"/><text x="534" y="756" text-anchor="middle">6</text>
+  </g>
+
+  <!-- 右侧说明栏 -->
+  <rect x="1000" y="70" width="380" height="770" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="1024" y="108" font-size="18" font-weight="700" fill="#1e3a5f">设计要点</text>
+  <g font-size="13.5">
+    <circle cx="1036" cy="142" r="11" fill="#1e3a5f"/><text x="1036" y="147" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">1</text>
+    <text x="1058" y="139" font-weight="600" fill="#1e293b">三态统计</text>
+    <text x="1058" y="159" fill="#475569">已接收、我的待办、待我确认</text>
+    <text x="1058" y="179" fill="#475569">三个数字对应“接收—确认—执行”</text>
+
+    <circle cx="1036" cy="218" r="11" fill="#1e3a5f"/><text x="1036" y="223" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">2</text>
+    <text x="1058" y="215" font-weight="600" fill="#1e293b">自动接收</text>
+    <text x="1058" y="235" fill="#475569">后台轮询已结束会议拉取纪要，</text>
+    <text x="1058" y="255" fill="#475569">也可手动点“立即同步”</text>
+
+    <circle cx="1036" cy="294" r="11" fill="#1e3a5f"/><text x="1036" y="299" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">3</text>
+    <text x="1058" y="291" font-weight="600" fill="#1e293b">归属判定透明</text>
+    <text x="1058" y="311" fill="#475569">每条待办给出判定依据（记忆画像</text>
+    <text x="1058" y="331" fill="#475569">与会议原话），一键“加入待办”</text>
+    <text x="1058" y="351" fill="#475569">或“不属于我”，错了随时纠正</text>
+
+    <circle cx="1036" cy="390" r="11" fill="#1e3a5f"/><text x="1036" y="395" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">4</text>
+    <text x="1058" y="387" font-weight="600" fill="#1e293b">截止提醒</text>
+    <text x="1058" y="407" fill="#475569">待办按截止时间排序，临近到期</text>
+    <text x="1058" y="427" fill="#475569">红色标记并自动推送通知</text>
+
+    <circle cx="1036" cy="466" r="11" fill="#1e3a5f"/><text x="1036" y="471" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">5</text>
+    <text x="1058" y="463" font-weight="600" fill="#1e293b">常驻通知铃铛</text>
+    <text x="1058" y="483" fill="#475569">侧边栏每 60 秒轮询未读数，</text>
+    <text x="1058" y="503" fill="#475569">点开可读、可全部已读、可直达</text>
+
+    <circle cx="1036" cy="542" r="11" fill="#1e3a5f"/><text x="1036" y="547" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">6</text>
+    <text x="1058" y="539" font-weight="600" fill="#1e293b">接收设置</text>
+    <text x="1058" y="559" fill="#475569">一次授权绑定飞书账号，</text>
+    <text x="1058" y="579" fill="#475569">同步间隔按需配置</text>
+  </g>
+  <rect x="1024" y="620" width="332" height="190" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="1040" y="648" font-size="13" font-weight="600" fill="#1e3a5f">会议内容的第二入口</text>
+  <text x="1040" y="674" font-size="12.5" fill="#475569">会议正文独立入库后，对话输入区</text>
+  <text x="1040" y="694" font-size="12.5" fill="#475569">开启“会议检索”即可直接问答，</text>
+  <text x="1040" y="714" font-size="12.5" fill="#475569">例如“上次对接会里供应商提出</text>
+  <text x="1040" y="734" font-size="12.5" fill="#475569">的交期问题是什么”，不必再翻</text>
+  <text x="1040" y="754" font-size="12.5" fill="#475569">聊天记录或文档。</text>
+</svg>
+</body>
+</html>

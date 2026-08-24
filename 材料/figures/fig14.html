@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1400" height="880" viewBox="0 0 1400 880" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+  </defs>
+
+  <text x="700" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">文档比对页与差异审阅页原型 · 上传即比对，差异一目了然</text>
+
+  <!-- 上传页框架 -->
+  <rect x="70" y="70" width="900" height="330" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="70" y="70" width="900" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="70" y="98" width="900" height="12" fill="#f1f5f9"/>
+  <circle cx="96" cy="90" r="7" fill="#f87171"/><circle cx="120" cy="90" r="7" fill="#fbbf24"/><circle cx="144" cy="90" r="7" fill="#4ade80"/>
+  <rect x="180" y="78" width="540" height="24" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="450" y="94" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · 文档比对（上传两版 PDF）</text>
+
+  <text x="106" y="146" font-size="20" font-weight="700" fill="#1e3a5f">文档比对</text>
+
+  <!-- A 上传区 -->
+  <rect x="106" y="168" width="330" height="176" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5"/>
+  <rect x="124" y="184" width="64" height="26" rx="6" fill="#2563eb"/>
+  <text x="156" y="202" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">A</text>
+  <text x="200" y="202" font-size="13.5" font-weight="600" fill="#334155">基准文档</text>
+  <rect x="236" y="228" width="70" height="52" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.6"/>
+  <path d="M 271 246 v 18 M 262 254 l 9 -9 9 9" stroke="#64748b" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="271" y="304" text-anchor="middle" font-size="13" fill="#475569">拖放 PDF 或点击上传</text>
+  <text x="271" y="326" text-anchor="middle" font-size="11.5" fill="#94a3b8">仅支持 PDF 格式</text>
+
+  <!-- VS -->
+  <line x1="450" y1="256" x2="482" y2="256" stroke="#cbd5e1" stroke-width="2.5"/>
+  <rect x="486" y="238" width="48" height="36" rx="18" fill="#1e3a5f"/>
+  <text x="510" y="262" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">VS</text>
+  <line x1="538" y1="256" x2="570" y2="256" stroke="#cbd5e1" stroke-width="2.5"/>
+
+  <!-- B 上传区（已上传态） -->
+  <rect x="576" y="168" width="330" height="176" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <rect x="594" y="184" width="64" height="26" rx="6" fill="#16a34a"/>
+  <text x="626" y="202" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">B</text>
+  <text x="670" y="202" font-size="13.5" font-weight="600" fill="#334155">比对文档</text>
+  <rect x="706" y="226" width="52" height="56" rx="6" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+  <path d="M 722 226 v 14 h 14" fill="none" stroke="#2563eb" stroke-width="1.8"/>
+  <line x1="718" y1="252" x2="746" y2="252" stroke="#2563eb" stroke-width="1.5"/>
+  <line x1="718" y1="260" x2="746" y2="260" stroke="#2563eb" stroke-width="1.5"/>
+  <line x1="718" y1="268" x2="740" y2="268" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="741" y="306" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">采购合同-2025版.pdf ✓ 已上传</text>
+  <text x="741" y="328" text-anchor="middle" font-size="11.5" fill="#64748b">点击替换</text>
+
+  <rect x="782" y="356" width="110" height="34" rx="8" fill="#2563eb"/>
+  <text x="837" y="378" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">发起比对</text>
+
+  <!-- 转场箭头 -->
+  <line x1="520" y1="412" x2="520" y2="452" stroke="#475569" stroke-width="2.5" marker-end="url(#ar)"/>
+  <rect x="552" y="424" width="210" height="22" rx="6" fill="#f1f5f9"/>
+  <text x="657" y="439" text-anchor="middle" font-size="12" fill="#475569">比对完成后自动进入结果页</text>
+
+  <!-- 结果页框架 -->
+  <rect x="70" y="464" width="900" height="376" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="70" y="464" width="900" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="70" y="492" width="900" height="12" fill="#f1f5f9"/>
+  <circle cx="96" cy="484" r="7" fill="#f87171"/><circle cx="120" cy="484" r="7" fill="#fbbf24"/><circle cx="144" cy="484" r="7" fill="#4ade80"/>
+  <rect x="180" y="472" width="540" height="24" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="450" y="488" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · 文档比对结果</text>
+
+  <text x="106" y="542" font-size="20" font-weight="700" fill="#1e3a5f">文档比对结果</text>
+  <!-- 图例 -->
+  <rect x="360" y="524" width="14" height="14" rx="3" fill="#ef4444" fill-opacity="0.55"/><text x="380" y="536" font-size="12" fill="#475569">删除的内容</text>
+  <rect x="456" y="524" width="14" height="14" rx="3" fill="#10b981" fill-opacity="0.55"/><text x="476" y="536" font-size="12" fill="#475569">新增的内容</text>
+  <rect x="552" y="524" width="14" height="14" rx="3" fill="#f59e0b" fill-opacity="0.55"/><text x="572" y="536" font-size="12" fill="#475569">修改的内容</text>
+  <!-- 相似度徽章 -->
+  <rect x="800" y="518" width="140" height="34" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="870" y="532" text-anchor="middle" font-size="10.5" fill="#64748b">文本相似度</text>
+  <text x="870" y="547" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">92.4%</text>
+
+  <!-- 双栏预览 -->
+  <text x="106" y="580" font-size="13" font-weight="600" fill="#334155">基准文档 A（逐页渲染）</text>
+  <text x="540" y="580" font-size="13" font-weight="600" fill="#334155">比对文档 B（逐页渲染）</text>
+  <rect x="106" y="590" width="400" height="230" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <g fill="#e2e8f0">
+    <rect x="126" y="610" width="360" height="7" rx="3"/>
+    <rect x="126" y="628" width="340" height="7" rx="3"/>
+    <rect x="126" y="646" width="356" height="7" rx="3"/>
+    <rect x="126" y="664" width="300" height="7" rx="3"/>
+    <rect x="126" y="682" width="352" height="7" rx="3"/>
+    <rect x="126" y="700" width="330" height="7" rx="3"/>
+    <rect x="126" y="718" width="348" height="7" rx="3"/>
+    <rect x="126" y="736" width="316" height="7" rx="3"/>
+    <rect x="126" y="754" width="356" height="7" rx="3"/>
+    <rect x="126" y="772" width="280" height="7" rx="3"/>
+  </g>
+  <rect x="120" y="642" width="368" height="14" fill="#ef4444" fill-opacity="0.5"/>
+  <rect x="120" y="714" width="368" height="14" fill="#f59e0b" fill-opacity="0.5"/>
+  <circle cx="268" cy="724" r="20" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="268" y="729" text-anchor="middle" font-size="9" fill="#dc2626">印章</text>
+
+  <rect x="540" y="590" width="400" height="230" rx="8" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <g fill="#e2e8f0">
+    <rect x="560" y="610" width="360" height="7" rx="3"/>
+    <rect x="560" y="628" width="340" height="7" rx="3"/>
+    <rect x="560" y="646" width="356" height="7" rx="3"/>
+    <rect x="560" y="664" width="300" height="7" rx="3"/>
+    <rect x="560" y="682" width="352" height="7" rx="3"/>
+    <rect x="560" y="700" width="330" height="7" rx="3"/>
+    <rect x="560" y="718" width="348" height="7" rx="3"/>
+    <rect x="560" y="736" width="316" height="7" rx="3"/>
+    <rect x="560" y="754" width="356" height="7" rx="3"/>
+    <rect x="560" y="772" width="280" height="7" rx="3"/>
+  </g>
+  <rect x="554" y="642" width="368" height="14" fill="#10b981" fill-opacity="0.5"/>
+  <rect x="554" y="714" width="368" height="14" fill="#f59e0b" fill-opacity="0.5"/>
+  <circle cx="700" cy="724" r="20" fill="none" stroke="#16a34a" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="700" y="729" text-anchor="middle" font-size="9" fill="#16a34a">印章</text>
+
+  <!-- 右侧说明栏 -->
+  <rect x="1000" y="70" width="380" height="770" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="1024" y="108" font-size="18" font-weight="700" fill="#1e3a5f">设计要点</text>
+  <g font-size="13.5">
+    <circle cx="1036" cy="142" r="11" fill="#1e3a5f"/><text x="1036" y="147" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">1</text>
+    <text x="1058" y="139" font-weight="600" fill="#1e293b">A / B 双上传区</text>
+    <text x="1058" y="159" fill="#475569">拖放或点击上传，文件就位后</text>
+    <text x="1058" y="179" fill="#475569">显示文件名与已上传状态，</text>
+    <text x="1058" y="199" fill="#475569">点击可替换，误传无需重来</text>
+
+    <circle cx="1036" cy="238" r="11" fill="#1e3a5f"/><text x="1036" y="243" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">2</text>
+    <text x="1058" y="235" font-weight="600" fill="#1e293b">差异色块标注</text>
+    <text x="1058" y="255" fill="#475569">红 = 删除、绿 = 新增、黄 = 修改，</text>
+    <text x="1058" y="275" fill="#475569">半透明色块叠加回原文位置，</text>
+    <text x="1058" y="295" fill="#475569">审阅人直接在原文语境里看差异</text>
+
+    <circle cx="1036" cy="334" r="11" fill="#1e3a5f"/><text x="1036" y="339" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">3</text>
+    <text x="1058" y="331" font-weight="600" fill="#1e293b">双栏并排对照</text>
+    <text x="1058" y="351" fill="#475569">两版文档逐页并排渲染，</text>
+    <text x="1058" y="371" fill="#475569">同步滚动对照，不必在多个</text>
+    <text x="1058" y="391" fill="#475569">窗口之间来回切换</text>
+
+    <circle cx="1036" cy="430" r="11" fill="#1e3a5f"/><text x="1036" y="435" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">4</text>
+    <text x="1058" y="427" font-weight="600" fill="#1e293b">相似度徽章</text>
+    <text x="1058" y="447" fill="#475569">整体文本相似度数值置顶展示，</text>
+    <text x="1058" y="467" fill="#475569">先看量级再逐处核对差异</text>
+
+    <circle cx="1036" cy="506" r="11" fill="#1e3a5f"/><text x="1036" y="511" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">5</text>
+    <text x="1058" y="503" font-weight="600" fill="#1e293b">印章独立处理</text>
+    <text x="1058" y="523" fill="#475569">印章与正文分离识别、分别</text>
+    <text x="1058" y="543" fill="#475569">比对，缺失、更换或篡改在</text>
+    <text x="1058" y="563" fill="#475569">标注页中以虚线圈提示</text>
+
+    <circle cx="1036" cy="602" r="11" fill="#1e3a5f"/><text x="1036" y="607" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">6</text>
+    <text x="1058" y="599" font-weight="600" fill="#1e293b">与抽取页同组</text>
+    <text x="1058" y="619" fill="#475569">文档抽取、文档比对同在“文档</text>
+    <text x="1058" y="639" fill="#475569">工具”分组，覆盖合同处理</text>
+    <text x="1058" y="659" fill="#475569">“抽字段、核版本”两端</text>
+  </g>
+  <rect x="1024" y="700" width="332" height="110" rx="10" fill="#fff" stroke="#e2e8f0"/>
+  <text x="1040" y="728" font-size="13" font-weight="600" fill="#1e3a5f">文档抽取页（同组页面）</text>
+  <text x="1040" y="752" font-size="12.5" fill="#475569">手填字段或上传 Excel 模板两种模式；</text>
+  <text x="1040" y="772" font-size="12.5" fill="#475569">字段可附示例开启增强抽取，</text>
+  <text x="1040" y="792" font-size="12.5" fill="#475569">结果支持一键导出 Excel。</text>
+</svg>
+</body>
+</html>

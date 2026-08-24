@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8">
+<style>*{margin:0;padding:0} body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:#fff}</style>
+</head>
+<body>
+<svg width="1400" height="880" viewBox="0 0 1400 880" style="display:block" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1e3a5f" flood-opacity="0.12"/></filter>
+  </defs>
+
+  <text x="700" y="40" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a5f">“AI 办公搭子”对话页原型 · 过程透明的人机协作界面</text>
+
+  <!-- 浏览器框架 -->
+  <rect x="70" y="70" width="900" height="750" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="2" filter="url(#sh)"/>
+  <rect x="70" y="70" width="900" height="40" rx="12" fill="#f1f5f9"/>
+  <rect x="70" y="98" width="900" height="12" fill="#f1f5f9"/>
+  <circle cx="96" cy="90" r="7" fill="#f87171"/><circle cx="120" cy="90" r="7" fill="#fbbf24"/><circle cx="144" cy="90" r="7" fill="#4ade80"/>
+  <rect x="180" y="78" width="540" height="24" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="450" y="94" text-anchor="middle" font-size="12.5" fill="#64748b">慧办 · AI 办公搭子（本地部署 · 会话状态内网持久化）</text>
+
+  <!-- 会话侧栏 -->
+  <rect x="90" y="122" width="170" height="680" rx="10" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="102" y="136" width="146" height="36" rx="8" fill="#2563eb"/>
+  <text x="175" y="159" text-anchor="middle" font-size="13.5" font-weight="600" fill="#fff">＋ 新建会话</text>
+  <!-- 历史项 1 active -->
+  <rect x="102" y="188" width="146" height="58" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="112" y="210" font-size="12" font-weight="600" fill="#1e3a8a">合同字段提取与比对</text>
+  <text x="112" y="228" font-size="10.5" fill="#64748b">08-22 14:30</text>
+  <text x="238" y="212" font-size="11" fill="#94a3b8">✕</text>
+  <!-- 历史项 2 -->
+  <rect x="102" y="254" width="146" height="58" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="112" y="276" font-size="12" fill="#334155">周报数据整理</text>
+  <text x="112" y="294" font-size="10.5" fill="#64748b">08-21 09:12</text>
+  <text x="238" y="278" font-size="11" fill="#cbd5e1">✕</text>
+  <!-- 历史项 3 -->
+  <rect x="102" y="320" width="146" height="58" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="112" y="342" font-size="12" fill="#334155">发票信息登记</text>
+  <text x="112" y="360" font-size="10.5" fill="#64748b">08-20 16:48</text>
+  <text x="238" y="344" font-size="11" fill="#cbd5e1">✕</text>
+
+  <!-- 用户消息 -->
+  <circle cx="922" cy="170" r="14" fill="#60a5fa"/>
+  <text x="922" y="175" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">林</text>
+  <rect x="560" y="140" width="344" height="60" rx="10" fill="#2563eb"/>
+  <text x="576" y="163" font-size="12.5" fill="#fff">提取这份合同的签订日期，并与上一版比对差异</text>
+  <rect x="576" y="172" width="196" height="20" rx="6" fill="#1d4ed8"/>
+  <text x="584" y="186" font-size="11" fill="#dbeafe">📄 采购合同-2025.pdf</text>
+
+  <!-- 助手消息 -->
+  <circle cx="296" cy="286" r="14" fill="#7c3aed"/>
+  <text x="296" y="291" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">慧</text>
+
+  <!-- 思考过程面板 -->
+  <rect x="322" y="252" width="560" height="162" rx="10" fill="#faf5ff" stroke="#7c3aed" stroke-width="1.6"/>
+  <rect x="322" y="252" width="560" height="34" rx="10" fill="#f3e8ff"/>
+  <text x="340" y="274" font-size="13" font-weight="700" fill="#5b21b6">▸ 思考过程</text>
+  <rect x="432" y="260" width="52" height="18" rx="9" fill="#ede9fe" stroke="#7c3aed" stroke-width="1"/>
+  <text x="458" y="273" text-anchor="middle" font-size="10.5" fill="#6d28d9">进行中</text>
+  <text x="340" y="310" font-size="12" fill="#6b7280" font-style="italic">先抽取新版合同字段，再调比对工具与上一版逐页对照……</text>
+  <!-- 工具行 1 -->
+  <rect x="340" y="326" width="524" height="38" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="354" y="350" font-size="12" font-weight="600" fill="#334155">🔧 extract_document</text>
+  <rect x="500" y="336" width="48" height="18" rx="9" fill="#dcfce7"/><text x="524" y="349" text-anchor="middle" font-size="10.5" fill="#15803d">完成</text>
+  <text x="560" y="350" font-size="11" fill="#94a3b8">入参：采购合同-2025.pdf → 签订日期 2025-03-15</text>
+  <!-- 工具行 2 -->
+  <rect x="340" y="370" width="524" height="38" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="354" y="394" font-size="12" font-weight="600" fill="#334155">🔧 compare_documents</text>
+  <rect x="516" y="380" width="48" height="18" rx="9" fill="#dcfce7"/><text x="540" y="393" text-anchor="middle" font-size="10.5" fill="#15803d">完成</text>
+  <text x="576" y="394" font-size="11" fill="#94a3b8">返回：文本相似度 92.4%，差异 3 处</text>
+
+  <!-- 回复气泡 -->
+  <rect x="322" y="428" width="560" height="52" rx="10" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="340" y="450" font-size="12.5" fill="#1e293b">比对完成：两版文本相似度 92.4%，差异集中在第三条付款方式，</text>
+  <text x="340" y="470" font-size="12.5" fill="#1e293b">新版将验收后 30 日付款改为 15 日▌</text>
+
+  <!-- 检索结果画廊条 -->
+  <rect x="340" y="490" width="200" height="26" rx="6" fill="#fff" stroke="#e2e8f0"/>
+  <rect x="348" y="495" width="16" height="16" rx="3" fill="#bae6fd"/><rect x="370" y="495" width="16" height="16" rx="3" fill="#bbf7d0"/>
+  <rect x="392" y="495" width="16" height="16" rx="3" fill="#fde68a"/>
+  <text x="416" y="507" font-size="10.5" fill="#64748b">检索结果画廊（图 / 音频内嵌播放）</text>
+
+  <!-- 澄清块 -->
+  <rect x="322" y="524" width="560" height="86" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+  <text x="340" y="548" font-size="12.5" font-weight="600" fill="#92400e">需要澄清：比对基准使用哪一版？</text>
+  <rect x="340" y="560" width="112" height="24" rx="12" fill="#fff" stroke="#d97706"/><text x="396" y="576" text-anchor="middle" font-size="11.5" fill="#b45309">2025 年 1 月版</text>
+  <rect x="460" y="560" width="112" height="24" rx="12" fill="#fff" stroke="#d97706"/><text x="516" y="576" text-anchor="middle" font-size="11.5" fill="#b45309">2024 年 11 月版</text>
+  <rect x="340" y="584" width="352" height="20" rx="6" fill="#fff" stroke="#e2e8f0"/>
+  <text x="350" y="596" font-size="11" fill="#94a3b8">或输入你的回答…</text>
+  <rect x="700" y="582" width="48" height="20" rx="6" fill="#2563eb"/><text x="724" y="596" text-anchor="middle" font-size="11" fill="#fff">发送</text>
+
+  <!-- 功能菜单弹层 -->
+  <rect x="300" y="622" width="248" height="106" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="316" y="644" font-size="12" font-weight="600" fill="#334155">⬆ 上传文件（PDF / Word / 图片）</text>
+  <line x1="312" y1="654" x2="536" y2="654" stroke="#f1f5f9"/>
+  <text x="316" y="676" font-size="12" font-weight="600" fill="#334155">📖 知识库检索</text>
+  <rect x="504" y="664" width="34" height="16" rx="8" fill="#2563eb"/><circle cx="528" cy="672" r="6" fill="#fff"/>
+  <line x1="312" y1="686" x2="536" y2="686" stroke="#f1f5f9"/>
+  <text x="316" y="708" font-size="12" fill="#64748b">📹 会议检索</text>
+  <rect x="504" y="696" width="34" height="16" rx="8" fill="#e2e8f0"/><circle cx="514" cy="704" r="6" fill="#fff"/>
+
+  <!-- 输入区 -->
+  <text x="292" y="760" font-size="11" fill="#94a3b8">按 Enter 发送 · Shift + Enter 换行</text>
+  <rect x="290" y="768" width="620" height="46" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.6"/>
+  <circle cx="316" cy="791" r="13" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="316" y="796" text-anchor="middle" font-size="14" font-weight="700" fill="#2563eb">＋</text>
+  <circle cx="334" cy="779" r="3.5" fill="#2563eb"/>
+  <text x="344" y="796" font-size="12.5" fill="#94a3b8">输入你的问题…</text>
+  <rect x="836" y="776" width="30" height="30" rx="8" fill="#fee2e2"/>
+  <rect x="845" y="785" width="12" height="12" rx="3" fill="#dc2626"/>
+  <rect x="872" y="776" width="30" height="30" rx="15" fill="#2563eb"/>
+  <path d="M 881 791 L 895 785 L 895 797 Z" fill="#fff"/>
+
+  <!-- 标注圆点 -->
+  <g font-size="12" font-weight="700" fill="#fff">
+    <circle cx="252" cy="160" r="11" fill="#1e3a5f"/><text x="252" y="164" text-anchor="middle">1</text>
+    <circle cx="312" cy="268" r="11" fill="#1e3a5f"/><text x="312" y="272" text-anchor="middle">2</text>
+    <circle cx="312" cy="440" r="11" fill="#1e3a5f"/><text x="312" y="444" text-anchor="middle">3</text>
+    <circle cx="556" cy="503" r="11" fill="#1e3a5f"/><text x="556" y="507" text-anchor="middle">4</text>
+    <circle cx="556" cy="540" r="11" fill="#1e3a5f"/><text x="556" y="544" text-anchor="middle">5</text>
+    <circle cx="622" cy="648" r="11" fill="#1e3a5f"/><text x="622" y="652" text-anchor="middle">6</text>
+    <circle cx="886" cy="760" r="11" fill="#1e3a5f"/><text x="886" y="764" text-anchor="middle">7</text>
+  </g>
+
+  <!-- 右侧标注栏 -->
+  <rect x="1000" y="70" width="380" height="750" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="1024" y="108" font-size="18" font-weight="700" fill="#1e3a5f">交互要点</text>
+  <g font-size="13.5">
+    <circle cx="1036" cy="140" r="11" fill="#1e3a5f"/><text x="1036" y="145" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">1</text>
+    <text x="1058" y="137" font-weight="600" fill="#1e293b">会话管理</text>
+    <text x="1058" y="157" fill="#475569">新建、切换与删除历史会话，</text>
+    <text x="1058" y="177" fill="#475569">会话状态持久化，可随时续聊</text>
+
+    <circle cx="1036" cy="216" r="11" fill="#1e3a5f"/><text x="1036" y="221" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">2</text>
+    <text x="1058" y="213" font-weight="600" fill="#1e293b">思考过程面板</text>
+    <text x="1058" y="233" fill="#475569">推理中实时展开推理文本与</text>
+    <text x="1058" y="253" fill="#475569">每次工具调用的名称、入参、</text>
+    <text x="1058" y="273" fill="#475569">结果；完成后默认收起只留结论</text>
+
+    <circle cx="1036" cy="312" r="11" fill="#1e3a5f"/><text x="1036" y="317" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">3</text>
+    <text x="1058" y="309" font-weight="600" fill="#1e293b">流式回复</text>
+    <text x="1058" y="329" fill="#475569">回复逐字输出，生成过程中可</text>
+    <text x="1058" y="349" fill="#475569">随时点停止中断；完成后可复制</text>
+
+    <circle cx="1036" cy="388" r="11" fill="#1e3a5f"/><text x="1036" y="393" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">4</text>
+    <text x="1058" y="385" font-weight="600" fill="#1e293b">检索结果画廊</text>
+    <text x="1058" y="405" fill="#475569">图片以缩略图网格、音频以</text>
+    <text x="1058" y="425" fill="#475569">播放器条内嵌在对话中折叠展示</text>
+
+    <circle cx="1036" cy="464" r="11" fill="#1e3a5f"/><text x="1036" y="469" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">5</text>
+    <text x="1058" y="461" font-weight="600" fill="#1e293b">澄清交互（human-in-the-loop）</text>
+    <text x="1058" y="481" fill="#475569">意图不明时气泡内给出问题与</text>
+    <text x="1058" y="501" fill="#475569">选项，点选或自由输入即可继续，</text>
+    <text x="1058" y="521" fill="#475569">作答后折叠为单行摘要</text>
+
+    <circle cx="1036" cy="560" r="11" fill="#1e3a5f"/><text x="1036" y="565" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">6</text>
+    <text x="1058" y="557" font-weight="600" fill="#1e293b">功能菜单</text>
+    <text x="1058" y="577" fill="#475569">加号菜单承载附件上传与知识</text>
+    <text x="1058" y="597" fill="#475569">库 / 会议检索开关，开启后本</text>
+    <text x="1058" y="617" fill="#475569">轮对话自动挂接对应检索</text>
+
+    <circle cx="1036" cy="656" r="11" fill="#1e3a5f"/><text x="1036" y="661" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">7</text>
+    <text x="1058" y="653" font-weight="600" fill="#1e293b">发送与中断</text>
+    <text x="1058" y="673" fill="#475569">生成中发送按钮切换为停止，</text>
+    <text x="1058" y="693" fill="#475569">Enter 发送、Shift+Enter 换行</text>
+  </g>
+</svg>
+</body>
+</html>
