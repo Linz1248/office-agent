@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 import aiosqlite
 import httpx
 import jwt as pyjwt
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -121,6 +121,7 @@ from ask_user import AskUser  # human-in-loop 外部工具（检索前追问补�
 import kb  # 个人知识库 RAG（嵌入/向量库/检索；未就绪时优雅降级）
 import memory_graph  # 图式长期记忆（Neo4j 记忆图谱；未就绪时优雅降级）
 import meetings  # 飞书会议（自动接收/子 agent 分析/待办提醒/会议知识库）
+import notifier  # 应用内实时事件总线（SSE 推送：通知及未来推送类型）
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -219,15 +220,15 @@ Skill 系统（技能指令）：
 
 # ── 鉴权 ──────────────────────────────────────────────────────
 _security = HTTPBearer()
+# SSE 流鉴权用：Header 可选（EventSource 无法设自定义头，走 ?access_token= query）
+_security_optional = HTTPBearer(auto_error=False)
 
 
-async def verify_token(
-    credentials: HTTPAuthorizationCredentials = Depends(_security),
-) -> str:
-    """验证 JWT token，返回用户名（作为 user_id）。"""
+def verify_token_payload(token: str) -> str:
+    """解码 JWT，返回用户名（作为 user_id）。头/query 两路 SSE 鉴权复用。"""
     try:
         payload = pyjwt.decode(
-            credentials.credentials,
+            token,
             JWT_SECRET_KEY,
             algorithms=[JWT_ALGORITHM],
         )
@@ -237,6 +238,13 @@ async def verify_token(
         return username
     except pyjwt.PyJWTError:
         raise HTTPException(status_code=401, detail="认证信息已失效")
+
+
+async def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+) -> str:
+    """验证 JWT token，返回用户名（作为 user_id）。"""
+    return verify_token_payload(credentials.credentials)
 
 
 def _ms(ts: str | None) -> int:
@@ -762,6 +770,43 @@ app.include_router(memory_graph.router)
 # 飞书会议路由（/meetings/*，经网关 /agent/meetings/* 暴露）；注入鉴权依赖
 meetings.set_auth_dependency(verify_token)
 app.include_router(meetings.router)
+
+
+# ── 实时事件 SSE 推流（/events/stream，经网关 /agent/events/stream 暴露）──
+# 通用用户级事件流：通知（type=notification）及未来任何推送类型复用同一条连接。
+# 鉴权：EventSource 无法设 Authorization 头，故 ?access_token=<jwt> query 兜底（头优先）。
+@app.get("/events/stream", summary="用户实时事件 SSE 推流")
+async def events_stream(
+    access_token: str | None = Query(None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_security_optional),
+):
+    token = (credentials.credentials if credentials else None) or access_token
+    if not token:
+        raise HTTPException(status_code=401, detail="未提供认证信息")
+    user_id = verify_token_payload(token)  # 校验并解码（失败抛 401）
+
+    async def gen():
+        q = notifier.subscribe(user_id)
+        try:
+            while True:
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=20)
+                    yield notifier.sse_frame(payload)
+                except asyncio.TimeoutError:
+                    # 20s 保活心跳：防网关 300s 读超时 + 维持连接
+                    yield ": keepalive\n\n"
+        finally:
+            notifier.unsubscribe(user_id, q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 提示反代/中间件不要缓冲
+        },
+    )
 
 
 class ChatAttachment(BaseModel):

@@ -186,6 +186,20 @@ if [ -x "$ROOT/install_memory_infra.sh" ]; then
   fi
 fi
 
+# ── RabbitMQ（Celery broker，无 Docker 原生部署）────────────
+# best-effort 拉起：未就绪则覆盖 CELERY_ENABLED=false，让记忆图谱降级进程内
+# asyncio 兜底；不阻断其余服务。仿 Neo4j 段落，失败回显日志尾部便于定位。
+if [ -x "$ROOT/install_rabbitmq.sh" ]; then
+  rabbitmq_log="$LOG_DIR/rabbitmq_start.log"
+  if "$ROOT/install_rabbitmq.sh" start >"$rabbitmq_log" 2>&1; then
+    echo "[记忆图谱] RabbitMQ 已启动（Celery broker）"
+  else
+    echo "[记忆图谱] RabbitMQ 未就绪，Celery worker 跳过，记忆功能降级进程内 asyncio。失败原因："
+    tail -n 12 "$rabbitmq_log" 2>/dev/null | sed 's/^/    /'
+    export MEMORY_GRAPH_CELERY_ENABLED=false
+  fi
+fi
+
 # ── 记忆图谱 Celery worker（启用 Celery 时随栈启动）─────────
 if [ "${MEMORY_GRAPH_CELERY_ENABLED:-false}" = "true" ]; then
   start_memory_worker

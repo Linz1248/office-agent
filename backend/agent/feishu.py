@@ -42,11 +42,20 @@ import logging
 import time
 from typing import Any
 
+import asyncio
+
 import httpx
 
 from config import FEISHU_BASE_URL
+from redis_utils import cache_get_json, cache_set_json
 
 logger = logging.getLogger(__name__)
+
+# 瞬时传输错误（ConnectTimeout/ReadTimeout/ConnectError 等）的退避重试参数。
+# 这些错误通常意味请求未到达飞书或无响应，对只读类飞书 API 重试安全；
+# API 错误（FeishuError / HTTPStatusError）不重试，避免副作用。
+_HTTP_MAX_RETRIES = 3       # 最多尝试 3 次（含首次）
+_HTTP_RETRY_BASE = 0.5      # 退避基数：0.5s → 1.0s → 2.0s
 
 # tenant_access_token 提前刷新的余量（秒）
 _TOKEN_REFRESH_MARGIN = 300
@@ -167,10 +176,24 @@ class FeishuClient:
         self._token_expires: float = 0.0
 
     async def _get_token(self) -> str:
-        """获取并缓存 tenant_access_token（自建应用凭证）。"""
+        """获取并缓存 tenant_access_token（自建应用凭证）。
+
+        三级缓存：进程内 → Redis（跨 FeishuClient 实例共享，按 app_id）→ 飞书接口。
+        本类实例按用户短生命周期创建（每次同步新建），进程内缓存无法跨实例复用，
+        故 Redis 层是主缓存；Redis 不可用回退进程内 + 接口，行为等同改造前。
+        仅缓存 tenant_access_token；user_access_token（OAuth 按用户令牌）不缓存。
+        """
         if self._token and time.time() < self._token_expires - _TOKEN_REFRESH_MARGIN:
             return self._token
-        resp = await self._http.post(
+        cache_key = f"feishu:tenant_token:{self._app_id}"
+        cached = await cache_get_json(cache_key)
+        if cached and isinstance(cached, str):
+            # Redis 命中即用（TTL 已预留 margin，token 仍有效）；进程内短期复用避免频繁查 Redis
+            self._token = cached
+            self._token_expires = time.time() + _TOKEN_REFRESH_MARGIN
+            return self._token
+        resp = await self._send_with_retry(
+            "POST",
             f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/internal",
             json={"app_id": self._app_id, "app_secret": self._app_secret},
         )
@@ -182,8 +205,35 @@ class FeishuClient:
                 f"获取访问凭证失败（请检查 App ID / App Secret）: {data.get('msg')}",
             )
         self._token = data["tenant_access_token"]
-        self._token_expires = time.time() + int(data.get("expire", 7200))
+        expire = int(data.get("expire", 7200))
+        self._token_expires = time.time() + expire
+        # 回写 Redis：TTL 提前 margin 刷新，避免缓存内仍用过期 token
+        await cache_set_json(cache_key, self._token, max(expire - _TOKEN_REFRESH_MARGIN, 60))
         return self._token
+
+    async def _send_with_retry(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """带指数退避的重试：仅对 httpx.TransportError（ConnectTimeout/ReadTimeout/
+        ConnectError/PoolTimeout 等）重试。
+
+        这些错误通常意味请求未到达飞书或中途无响应（CDN 抖动等），对只读类飞书
+        API 重试安全；HTTP 状态码错误与 FeishuError 不在此处重试（无副作用收益，
+        且可能重复触发限流）。重试耗尽后抛最后一条 TransportError，由上层记日志。
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, _HTTP_MAX_RETRIES + 1):
+            try:
+                return await self._http.request(method, url, **kwargs)
+            except httpx.TransportError as e:
+                last_exc = e
+                if attempt >= _HTTP_MAX_RETRIES:
+                    raise
+                delay = _HTTP_RETRY_BASE * (2 ** (attempt - 1))
+                logger.warning(
+                    "[feishu] %s %s 瞬时传输失败（第%d/%d次）：%s；%.1fs 后重试",
+                    method, url, attempt, _HTTP_MAX_RETRIES, e, delay,
+                )
+                await asyncio.sleep(delay)
+        raise last_exc  # 不可达
 
     async def _request(
         self, method: str, path: str, *, params: dict | None = None,
@@ -198,7 +248,7 @@ class FeishuClient:
         raise_for_status 把它吞成无意义的 "400 Bad Request"，导致无法定位。
         """
         token = self._user_access_token or await self._get_token()
-        resp = await self._http.request(
+        resp = await self._send_with_retry(
             method,
             f"{FEISHU_BASE_URL}/open-apis{path}",
             headers={"Authorization": f"Bearer {token}"},
@@ -223,7 +273,7 @@ class FeishuClient:
         交由 _check 抛出携带错误码的 FeishuError；文本响应直接返回。
         """
         token = self._user_access_token or await self._get_token()
-        resp = await self._http.request(
+        resp = await self._send_with_retry(
             method,
             f"{FEISHU_BASE_URL}/open-apis{path}",
             headers={"Authorization": f"Bearer {token}"},

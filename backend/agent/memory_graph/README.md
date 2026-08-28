@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | 图谱（实体/陈述/关系/事件/社区/洞察） | **Neo4j** | 原生向量索引（余弦）+ cjk 全文索引 + 唯一约束；按 `id` MERGE 幂等写入。 |
 | 来源原文 / 萃取审计 / 人工纠错 / 反思计数 | **SQLite**（默认，可选 PostgreSQL） | `memories`、`memory_corrections`、`mg_counters` 三表；`user_id` 为 String（office-agent 用户名），不外键。SQLAlchemy 双兼容（JSON/JSONB 变体）。 |
-| 异步萃取 | 进程内 asyncio（默认）或 **Celery**（可选） | Celery 仅在 `MEMORY_GRAPH_CELERY_ENABLED=true` 时启用（需 Redis broker）；默认零队列依赖，中间件直接派发进程内后台任务。 |
+| 异步萃取 | 进程内 asyncio（默认）或 **Celery**（可选） | Celery 仅在 `MEMORY_GRAPH_CELERY_ENABLED=true` 时启用（broker=RabbitMQ，result backend=Redis）；默认零队列依赖，中间件直接派发进程内后台任务。 |
 
 ### 部署形态
 
@@ -125,6 +125,8 @@ Vue3 + `vue-force-graph`（与 Comet 的 `react-force-graph-2d` 同为 d3-force 
    （安装 JDK 与 Neo4j；start_all.sh 也会在启动 agent 前自动 best-effort 拉起 Neo4j）。
 2. 在 `backend/agent/` 环境 `pip install -r memory_graph/requirements.txt`
    （已在 office-agent conda env 安装：neo4j/SQLAlchemy/asyncpg/redis/celery/tiktoken）。
-3. （可选）高并发需队列时：`.env` 设 `MEMORY_GRAPH_CELERY_ENABLED=true` 并启动
-   `backend/run_memory_worker.sh`（需 Redis）。不启动也完全可运行--萃取走进程内后台任务。
+3. （可选）高并发需队列时：`.env` 设 `MEMORY_GRAPH_CELERY_ENABLED=true`，安装并启动
+   RabbitMQ（`backend/install_rabbitmq.sh install && ./install_rabbitmq.sh start`），
+   再启动 `backend/run_memory_worker.sh`（broker=RabbitMQ，result backend=Redis）。
+   不启动也完全可运行--萃取走进程内后台任务。
 4. 启动 agent 服务（`./start_all.sh`）即可。默认零额外配置：审计库 SQLite、无 Redis。

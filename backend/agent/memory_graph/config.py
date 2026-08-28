@@ -6,7 +6,8 @@
 无 Docker 部署（默认）：
   - 审计库默认 SQLite（不使用 PG，零额外服务）；
   - 反思增量计数优先 Redis（``INCRBY``），Redis 不可用回退 SQLite；Redis 为可选
-    外部服务（已安装并启动即可用于计数；``celery_enabled=true`` 时兼作 broker）；
+    外部服务（已安装并启动即可用于计数/缓存；``celery_enabled=true`` 时 broker
+    用 RabbitMQ、result backend 仍用 Redis，见 ``celery_broker_url``）；
   - 萃取派发默认进程内 asyncio（零额外进程），``celery_enabled=true`` 时走 Celery；
   - 唯一必需的外部服务是 Neo4j（原生 tarball 部署，见 backend/install_memory_infra.sh）。
 """
@@ -54,13 +55,17 @@ class Settings(BaseSettings):
     # ── Redis / Celery ──
     # redis_url：反思增量计数后端（优先于 SQLite）。Redis 已安装启动即可用，
     #   不可用时自动回退 SQLite，不阻断萃取。
-    # celery_enabled：是否走 Celery 队列派发萃取/反思（broker=Redis）。默认 False
-    #   走进程内 asyncio（零额外进程）；置 True 需启动 backend/run_memory_worker.sh。
+    # celery_enabled：是否走 Celery 队列派发萃取/反思（broker=RabbitMQ）。默认
+    #   False 走进程内 asyncio（零额外进程）；置 True 需 RabbitMQ broker +
+    #   启动 backend/run_memory_worker.sh（result backend 仍为 Redis）。
     celery_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
     redis_max_connections: int = 50
-    celery_broker_url: str = "redis://localhost:6379/1"
+    celery_broker_url: str = "amqp://officeagent:officeagent@localhost:5672/officeagent"
     celery_result_backend: str = "redis://localhost:6379/2"
+    # 缓存层（飞书 token / 嵌入 / 抽取幂等等易失数据），供 agent/redis_utils 用。
+    # broker 让位 RabbitMQ 后，Redis 退回缓存/锁/计数/result backend。
+    redis_cache_url: str = "redis://localhost:6379/3"
 
     # ── Embedding：维度须与所用 embedding 模型输出维度一致 ──
     # 默认复用 office-agent 知识库的 Ollama qwen3-embedding:8b（4096 维）
@@ -68,6 +73,11 @@ class Settings(BaseSettings):
     embedding_ollama_host: str = "http://localhost:11434"
     embedding_model: str = "qwen3-embedding:8b"
     embedding_dims: int = 4096
+    # 嵌入模型保活间隔（秒）：Ollama 默认空闲 5min 卸载模型，下次首召回冷加载
+    # qwen3-embedding:8b(10GB) 约 16s，会撞 active_recall 超时(默认 10s)。
+    # 启动后立即预热一次 + 每 N 秒嵌一短串，使模型常驻热态，召回始终 <1s。
+    # 须 < Ollama keep_alive(默认 300s)；默认 180s。
+    embed_keepalive_interval: float = 180.0
 
     # ── 检索门控 ──
     global_search_min_vector_score: float = 0.45
@@ -95,6 +105,9 @@ class Settings(BaseSettings):
     active_recall_min_confidence: float = 0.6
     active_recall_uncertain_confidence: float = 0.75
     active_recall_max_chars: int = 600
+    # 召回整体超时（秒）：召回是"锦上添花"，超时即放弃注入不阻断对话。
+    # Ollama 8B 嵌入 + Neo4j 多跳检索较慢时，调大可避免频繁跳过（默认 8.0）。
+    active_recall_timeout: float = 8.0
 
     # ── 中间件控制模式：static_control / agent_control / both ──
     control_mode: str = "both"

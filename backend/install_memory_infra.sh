@@ -154,6 +154,16 @@ normalize_conf() {
   chmod +x "$NEO4J_HOME"/bin/* 2>/dev/null || true
 }
 
+# 单次探测 Bolt 端口是否已监听（不等待，用于判断进程是否僵死）
+_bolt_open() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$NEO4J_PORT") 2>/dev/null && exec 3>&- 3<&- 2>/dev/null
+}
+
+# Neo4j 进程是否存活（pgrep 匹配 JVM 主类，不依赖 pid 文件，避免僵死 pid 误判）
+_neo4j_proc_alive() {
+  pgrep -f "org.neo4j" >/dev/null 2>&1
+}
+
 # ── 等待 Neo4j Bolt 就绪（start/restart 后调用，防 agent 服务冷启动竞态）──
 wait_ready() {
   local waited=0
@@ -251,16 +261,34 @@ case "$cmd" in
   start|stop|status|restart)
     [ -x "$NEO4J_HOME/bin/neo4j" ] || { echo "[错误] 未安装 Neo4j。先执行: ./install_memory_infra.sh install" >&2; exit 1; }
     locate_java || exit 1
-    run_as_user "$NEO4J_HOME/bin/neo4j" "$cmd" || {
-      # neo4j start 对「已在运行」返回非零并打印提示——视为成功状态
-      case "$cmd" in
-        start|restart) : ;;
-        *) exit 1 ;;
-      esac
-    }
-    # start/restart 后等待 Bolt 就绪（冷启动约 10-30s；首次初始化更久）
+
     case "$cmd" in
-      start|restart) wait_ready ;;
+      status)
+        run_as_user "$NEO4J_HOME/bin/neo4j" status || exit 1
+        ;;
+      stop)
+        run_as_user "$NEO4J_HOME/bin/neo4j" stop || true
+        ;;
+      start|restart)
+        # 僵死 pid 自愈：neo4j 进程在跑但 Bolt 未就绪时（上次 stop 不干净留下的
+        # 残留 pid，neo4j start 会误报"already running"），先 stop 残留再 start，
+        # 避免干等 READY_TIMEOUT 超时（用户曾撞到的 90s 卡死）。
+        if _neo4j_proc_alive && ! _bolt_open; then
+          echo "[记忆图谱] Neo4j 进程在跑但 Bolt 未就绪（疑僵死），stop 后重启..."
+          run_as_user "$NEO4J_HOME/bin/neo4j" stop >/dev/null 2>&1 || true
+          pkill -f "org.neo4j" 2>/dev/null || true
+          sleep 2
+        fi
+        # neo4j start 对「已在运行」返回非零——此时若 Bolt 已开视为健康，否则真失败
+        if ! _bolt_open; then
+          run_as_user "$NEO4J_HOME/bin/neo4j" start || {
+            echo "[错误] Neo4j 启动失败（查看 $NEO4J_HOME/logs/neo4j.log）。" >&2
+            exit 1
+          }
+        fi
+        # start/restart 后等待 Bolt 就绪（冷启动约 10-30s；首次初始化更久）
+        wait_ready
+        ;;
     esac
     ;;
 

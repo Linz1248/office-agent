@@ -42,6 +42,7 @@ _ready = False
 _chat_client = None
 _embed_client = None
 _retry_task: asyncio.Task | None = None
+_keepalive_task: asyncio.Task | None = None
 _RETRY_INTERVAL = 30  # 初始化失败后的自愈重试间隔（秒）
 
 # ── 多租户上下文（与 kb.py 同模式）──
@@ -135,6 +136,8 @@ async def init_memory_graph(chat_model=None, embedding_model=None) -> bool:
         settings.neo4j_uri, settings.audit_backend, settings.embedding_dims,
         settings.control_mode, settings.celery_enabled,
     )
+    # 启动嵌入模型保活：冷加载 ~16s 会撞召回超时，故启动即后台预热 + 周期保活
+    _start_keepalive()
     return _ready
 
 
@@ -175,9 +178,41 @@ def _start_retry_loop() -> None:
         logger.warning("无运行中的事件循环，跳过自愈重试（进程退出场景）")
 
 
+async def _keepalive_loop() -> None:
+    """嵌入模型保活：启动即预热一次（冷加载 ~16s 在后台进行，不阻塞就绪），
+    之后每 ``embed_keepalive_interval`` 秒嵌一短串，重置 Ollama 空闲计时器，
+    避免模型被卸载导致下次首召回冷加载撞 active_recall 超时。
+    """
+    _, embed_client = get_clients()
+    if embed_client is None:
+        return
+    while True:
+        try:
+            await embed_client.embed_one("keepalive")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.info("[memory_graph] 嵌入模型保活失败（忽略，下轮重试）: %s", e)
+        await asyncio.sleep(settings.embed_keepalive_interval)
+
+
+def _start_keepalive() -> None:
+    global _keepalive_task
+    if _keepalive_task is not None and not _keepalive_task.done():
+        return
+    try:
+        _keepalive_task = asyncio.create_task(_keepalive_loop())
+        logger.info(
+            "[memory_graph] 嵌入模型保活已启动（每 %.0fs 预热，防冷加载撞召回超时）",
+            settings.embed_keepalive_interval,
+        )
+    except RuntimeError:
+        logger.warning("无运行中的事件循环，跳过嵌入模型保活（进程退出场景）")
+
+
 async def close_memory_graph() -> None:
     """关闭连接（应用退出时调用）。"""
-    global _ready, _init_done, _chat_client, _embed_client, _retry_task
+    global _ready, _init_done, _chat_client, _embed_client, _retry_task, _keepalive_task
     _ready = False
     _init_done = False
     _chat_client = None
@@ -185,6 +220,9 @@ async def close_memory_graph() -> None:
     if _retry_task is not None and not _retry_task.done():
         _retry_task.cancel()
     _retry_task = None
+    if _keepalive_task is not None and not _keepalive_task.done():
+        _keepalive_task.cancel()
+    _keepalive_task = None
     try:
         await close_neo4j()
     except Exception:

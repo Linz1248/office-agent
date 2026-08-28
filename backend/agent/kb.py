@@ -889,45 +889,48 @@ async def set_shared(user_id: str, doc_id: str, shared: bool) -> bool:
     """
     if _db is None:
         return False
-    doc = await get_document(user_id, doc_id)
-    if doc is None:
-        return False
-    if doc["status"] != "ready" or not doc["text"]:
-        raise ValueError("文档尚未就绪，无法切换共享状态，请等待索引完成")
+    # 并发互斥：删旧点+重建索引非原子，并发切换同一 doc 会出错。Redis 不可用
+    # 时降级放行（等同改造前乐观并发）。锁粒度 user+doc，ttl 60s 覆盖重建耗时。
+    async with distributed_lock(f"kb:set_shared:{user_id}:{doc_id}", ttl=60):
+        doc = await get_document(user_id, doc_id)
+        if doc is None:
+            return False
+        if doc["status"] != "ready" or not doc["text"]:
+            raise ValueError("文档尚未就绪，无法切换共享状态，请等待索引完成")
 
-    # 1) 删除旧向量点（按 document_id）
-    try:
-        await _insert_handle(
-            user_id
-        ).delete_document(doc_id)
-    except Exception as e:
-        logger.warning("切换共享：删除旧向量点失败 doc=%s: %s", doc_id, e)
+        # 1) 删除旧向量点（按 document_id）
+        try:
+            await _insert_handle(
+                user_id
+            ).delete_document(doc_id)
+        except Exception as e:
+            logger.warning("切换共享：删除旧向量点失败 doc=%s: %s", doc_id, e)
 
-    # 2) 按新 shared 重建索引。失败则置 failed 态（旧点已删，避免留「就绪但无向量」
-    #    的半状态），向上抛出由接口返回错误；用户可删除后重新上传。
-    try:
-        chunk_count = await _index_text(
-            user_id, doc_id, doc["filename"], doc["text"],
-            shared=shared, enabled=doc["enabled"],
-        )
-    except Exception as e:
+        # 2) 按新 shared 重建索引。失败则置 failed 态（旧点已删，避免留「就绪但无向量」
+        #    的半状态），向上抛出由接口返回错误；用户可删除后重新上传。
+        try:
+            chunk_count = await _index_text(
+                user_id, doc_id, doc["filename"], doc["text"],
+                shared=shared, enabled=doc["enabled"],
+            )
+        except Exception as e:
+            await _db.execute(
+                "UPDATE kb_documents SET status='failed', error=?, updated_at=? "
+                "WHERE user_id=? AND doc_id=?",
+                (f"切换共享重建索引失败: {e}"[:500], _now(), user_id, doc_id),
+            )
+            await _db.commit()
+            raise
+
+        # 3) 更新元数据
         await _db.execute(
-            "UPDATE kb_documents SET status='failed', error=?, updated_at=? "
-            "WHERE user_id=? AND doc_id=?",
-            (f"切换共享重建索引失败: {e}"[:500], _now(), user_id, doc_id),
+            "UPDATE kb_documents SET shared=?, chunk_count=?, status='ready', "
+            "error=NULL, updated_at=? WHERE user_id=? AND doc_id=?",
+            (1 if shared else 0, chunk_count, _now(), user_id, doc_id),
         )
         await _db.commit()
-        raise
-
-    # 3) 更新元数据
-    await _db.execute(
-        "UPDATE kb_documents SET shared=?, chunk_count=?, status='ready', "
-        "error=NULL, updated_at=? WHERE user_id=? AND doc_id=?",
-        (1 if shared else 0, chunk_count, _now(), user_id, doc_id),
-    )
-    await _db.commit()
-    logger.info("切换共享完成 user=%s doc=%s shared=%s", user_id, doc_id, shared)
-    return True
+        logger.info("切换共享完成 user=%s doc=%s shared=%s", user_id, doc_id, shared)
+        return True
 
 
 async def set_enabled(user_id: str, doc_id: str, enabled: bool) -> bool:

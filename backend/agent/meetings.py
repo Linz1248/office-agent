@@ -1264,6 +1264,14 @@ async def create_notification(
         (user_id, notif_id, kind, title, content, ref_id, _now()),
     )
     await _db.commit()
+    # 落库后实时推送给该用户在线 SSE 订阅者（best-effort：投递失败不回滚落库，
+    # 离线/队列满/断连期间漏的实时帧由 list_notifications REST 兜底补齐）。
+    import notifier
+    notifier.publish(user_id, "notification", {
+        "notif_id": notif_id, "kind": kind, "title": title,
+        "content": content, "ref_id": ref_id, "read": False,
+        "created_at": int(_now()),
+    })
     if dispatch_external:
         await _dispatch_external(user_id, title, content)
     return notif_id

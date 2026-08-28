@@ -10,6 +10,6 @@ aiosqlite>=0.19.0
 tiktoken>=0.7.0
 # 可选：MEMORY_GRAPH_AUDIT_BACKEND=postgres 时需要
 asyncpg>=0.29.0
-# 可选：MEMORY_GRAPH_CELERY_ENABLED=true 时需要（需 Redis broker）
+# 可选：MEMORY_GRAPH_CELERY_ENABLED=true 时需要（broker=RabbitMQ，result backend=Redis）
 redis>=5.0.0
 celery>=5.3.0

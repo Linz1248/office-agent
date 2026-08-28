@@ -191,6 +191,7 @@ import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import router from '@/router'
 import request from '@/utils/request'
+import config from '/config'
 import { ElMessage } from 'element-plus'
 import BrandLogo from '@/components/BrandLogo.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
@@ -397,11 +398,44 @@ const formatNotifTime = (ms) => ms
   ? new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   : ''
 
+// ── 实时通知（SSE 推流 + 60s 轮询兜底） ──
+// EventSource 无法设 Authorization 头，token 走 ?access_token= query。
+// 致命断开（401/Token 失效）→ 降级 60s 轮询；瞬时断开 → 浏览器自动重连，
+// onopen 时从 REST 重取基线，补齐断连期间漏掉的增量。
+let notifSource = null   // EventSource 实例
+const eventsStreamUrl = () => {
+  const token = store.getToken || ''
+  return `${config.agent}/events/stream?access_token=${encodeURIComponent(token)}`
+}
+const openEventStream = () => {
+  notifSource?.close()
+  if (!store.getToken) return  // 未登录不开流（重挂组件时若已登出）
+  const es = new EventSource(eventsStreamUrl())
+  es.onopen = () => { fetchUnreadCount() }   // (重)连上即重取基线，修正断连期间漏的增量
+  es.onmessage = (ev) => {
+    const d = JSON.parse(ev.data)
+    if (d.type === 'notification') {
+      unreadCount.value += 1   // 新到一条未读通知
+      // 后续新功能在此加分支：else if (d.type === 'xxx') { ... }
+    }
+  }
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {  // 致命 → 降级轮询
+      es.close(); notifSource = null
+      if (!notifTimer) notifTimer = setInterval(fetchUnreadCount, 60000)
+    }  // 否则浏览器自动重连，onopen 会重取基线补漏
+  }
+  notifSource = es
+}
+
 onMounted(() => {
-  fetchUnreadCount()
-  notifTimer = setInterval(fetchUnreadCount, 60000)
+  fetchUnreadCount()        // 立即取徽标基线
+  openEventStream()
 })
-onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
+onUnmounted(() => {
+  notifSource?.close()
+  if (notifTimer) clearInterval(notifTimer)
+})
 </script>
 
 <style scoped>

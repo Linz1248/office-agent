@@ -11,7 +11,7 @@ from memory_graph.repositories.neo4j.memory_graph_repository import MemoryGraphR
 
 logger = get_logger(__name__)
 
-_RECALL_TIMEOUT = 3.5
+_RECALL_TIMEOUT = settings.active_recall_timeout
 
 
 def _confidence(value: object, default: float = 0.8) -> float:
