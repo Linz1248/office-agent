@@ -51,6 +51,7 @@ backend/run/
 # 样本/测试数据
 backend/document_compare/data/
 backend/document_extract/data/
+backend/document_extract/output/
 # pip 安装误生成的文件
 backend/=*
 
